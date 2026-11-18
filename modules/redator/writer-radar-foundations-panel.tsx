@@ -224,6 +224,7 @@ function MaterialNovo({ leitura, document }: { leitura: LeituraDoMaterial; docum
     {trilha.length > 0 && <><p className="mt-1 font-semibold text-foreground">Trilha “Continue no Silo” (T, no fim do artigo)</p><ul className="mt-1 space-y-1">{trilha.map(item => <ItemDoChecklist key={item.id} item={item}/>)}</ul></>}
     {checklist.authority.length > 0 && <><p className="mt-1 font-semibold text-foreground">Fontes de autoridade (X, na frase que sustentam)</p><ul className="mt-1 space-y-1">{checklist.authority.map(item => <ItemDoChecklist key={item.id} item={item}/>)}</ul></>}
     {material.ymylWithoutSource.length > 0 && <p className="mt-1 text-warning" data-writer-material-ymyl="">{material.ymylWithoutSource.join(" ")}</p>}
+    <Bloco nome="Materiais para download" linhas={material.downloadDeliverables ?? []} testid="downloads" aberto/>
     <Bloco nome="Fechamento em 4 tempos" linhas={material.closing} testid="closing" aberto/>
     <Bloco nome="Análise competitiva" linhas={material.competitive} testid="competitive"/>
     <Bloco nome="Diferencial da marca" linhas={material.brandEdge} testid="brand-edge"/>

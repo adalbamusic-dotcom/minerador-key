@@ -1,5 +1,9 @@
 # Estado atual — Redator
 
+## Materiais para download vindos do Radar — 2026-11-18
+
+O painel de fundamentos e o briefing do MCP exibem o adendo de produção do CSV “Para escrever”, quando aplicável. A leitura usa o campo opcional `downloadDeliverables` do material do Radar. No MCP, a resposta menor preserva o bloco inteiro ou remete ao CSV de escrita. O adendo orienta quem escreve a produzir o recurso e verificar o link antes de anunciar o download. Sem execução ou escrita no armazenamento pela plataforma. Cobertura com fixtures no export e no briefing. Validação em documento real pendente.
+
 ## Defeitos do inventário de botões — 2026-10-18
 
 Decisão do dono "Só os defeitos agora" (`docs/compartilhado/inventario-botoes-e-linha-2026-10-18.md`). Nada de botão, rota ou etapa novos. **Verificado no código e confirmado por teste DOM (clique no botão). Ainda não validado na tela.**

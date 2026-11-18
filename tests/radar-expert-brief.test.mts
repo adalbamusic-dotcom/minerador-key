@@ -103,7 +103,7 @@ test("painel real mantém criação distinta de salvamento e bloqueia envio inco
   assert.match(panel, /\/api\/editorial\/expert-briefs\/send/);
   assert.match(panel, /projectRadarExpertEvidence/);
   assert.match(panel, /canonicalEvidence/);
-  assert.match(panel, /A contribuição remota não vira ExpertEvidence automaticamente/);
+  assert.match(panel, /selectedEvidenceCount = articleContributions\.filter\(contribution => radarSpecialistDecisionIsActive\(decisionOf\(contribution\.id\)\)\)/);
   assert.doesNotMatch(panel, /telegramChatId|telegramUserId/);
   assert.doesNotMatch(panel, /ExpertContributionPanel/);
 });

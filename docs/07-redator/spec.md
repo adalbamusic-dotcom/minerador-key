@@ -1,4 +1,9 @@
 # Spec — Redator
+
+### Materiais para download
+
+Quando o Radar indicar um arquivo na entrega de escrita, o Redator exibe a orientação nos fundamentos e no briefing MCP. A produção e a disponibilização do recurso são tarefas de quem escreve. O texto só oferece download após conferência do arquivo e do acesso ao endereço autorizado pela marca. O adendo segue [a regra de exportação do Radar](../05-radar/spec.md).
+
 ## 1. Propósito
 Produzir um ContentDocument a partir do dossiê canônico do Radar e, quando fizer sentido, derivar um roteiro de vídeo ou carrossel da mesma origem. ContentPlan aprovado continua aceito apenas no caminho histórico.
 ## 2. Responsabilidades

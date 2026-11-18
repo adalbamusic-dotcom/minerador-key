@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { InfoHint } from "@/components/info-hint";
 import type { RadarR6ExpertEvidenceInput, RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
 import type { RadarR7TopicSuggestion } from "@/lib/radar/r7-sequential";
 import { parseRadarR7TopicResponse } from "@/lib/radar/r7-sequential";
@@ -147,6 +148,7 @@ type RadarConsultationView = {
 };
 
 const surface = "rounded-md border border-divider bg-surface-subtle p-3";
+const disclosure = "cursor-pointer py-1 text-sm font-medium text-text-muted hover:text-module-accent focus-visible:ring-2 focus-visible:ring-focus";
 const action = "inline-flex min-h-10 items-center justify-center rounded-md border border-divider px-3 py-2 text-sm text-foreground transition-colors hover:border-context-accent hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:text-text-muted";
 const primaryAction = `${action} border-context-accent bg-selected`;
 
@@ -303,6 +305,7 @@ const DECISOES: Array<{ value: RadarSpecialistDecision; label: string }> = [
   { value: "ACCEPTED_EVIDENCE", label: "Aceitar como evidência" },
   { value: "SUPPORT_ONLY", label: "Usar como apoio" },
   { value: "QUOTE_CANDIDATE", label: "Marcar citação literal" },
+  { value: "MAIN_SUBJECT", label: "Incluir no assunto principal" },
   { value: "REJECTED", label: "Rejeitar" },
 ];
 
@@ -402,9 +405,11 @@ function RadarSpecialistDirectEntry({ brandId, articleId, articleDnaVersionId, e
   };
 
   return <section className={surface} data-testid="radar-specialist-direct-entry" aria-label="Escrever o parecer do especialista">
-    <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">Escrever o parecer aqui</h4>
-    <p className="mt-1 text-sm leading-6 text-text-muted">Para o especialista com acesso à plataforma: escreva direto, sem Telegram. O parecer passa pela mesma revisão das respostas recebidas.</p>
-    <div className="mt-3 grid gap-3 md:grid-cols-2">
+    <div className="flex items-center gap-1">
+      <h4 className="text-sm font-semibold text-foreground">Escrever o parecer aqui</h4>
+      <InfoHint title="Escrever o parecer aqui" description="Registre o parecer na plataforma. Ele fica disponível nas respostas recebidas para revisão." />
+    </div>
+    <div className="mt-2 grid gap-2 sm:grid-cols-2">
       <label className="block text-sm text-foreground">Especialista
         <select value={especialista} onChange={event => setExpertId(event.target.value)} disabled={enviando} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" data-testid="radar-specialist-direct-expert">
           <option value="self">Eu mesmo (quem está logado)</option>
@@ -417,13 +422,13 @@ function RadarSpecialistDirectEntry({ brandId, articleId, articleDnaVersionId, e
         </select>
       </label>
     </div>
-    {tipo === "RESPOSTA" && <label className="mt-3 block text-sm text-foreground">Ponto de revisão respondido
+    {tipo === "RESPOSTA" && <label className="mt-2 block text-sm text-foreground">Ponto de revisão respondido
       <select value={pontoId} onChange={event => setPontoId(event.target.value)} disabled={enviando} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" data-testid="radar-specialist-direct-point">
         {requirements.map(item => <option value={item.requirementId} key={item.requirementId}>{item.specificQuestion}</option>)}
       </select>
     </label>}
-    <label className="mt-3 block text-sm text-foreground">Parecer
-      <textarea value={texto} onChange={event => setTexto(event.target.value.slice(0, PARECER_MAX))} rows={6} disabled={enviando} placeholder="Ex.: o que pode ser afirmado com segurança, como fechar o artigo, o argumento para o CTA…" className="mt-1 min-h-32 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm leading-6 text-foreground disabled:cursor-not-allowed disabled:opacity-70" data-testid="radar-specialist-direct-text" />
+    <label className="mt-2 block text-sm text-foreground">Parecer
+      <textarea value={texto} onChange={event => setTexto(event.target.value.slice(0, PARECER_MAX))} rows={3} disabled={enviando} placeholder="Ex.: o que pode ser afirmado com segurança ou como fechar o artigo" className="mt-1 block w-full resize-y rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm leading-5 text-foreground disabled:cursor-not-allowed disabled:opacity-70" data-testid="radar-specialist-direct-text" />
     </label>
     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
       <span className="text-sm text-text-muted">{texto.length.toLocaleString("pt-BR")} de {PARECER_MAX.toLocaleString("pt-BR")} caracteres</span>
@@ -1299,7 +1304,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
    *
    * Agora: quem respondeu, a resposta original recolhida, a contribuição
    * organizada com a classificação JÁ SUGERIDA, onde isso se aplica no artigo,
-   * e as quatro decisões. Ids, transcrição e proveniência continuam inteiros —
+   * e as decisões. Ids, transcrição e proveniência continuam inteiros —
    * um nível abaixo, em "Detalhes avançados". NADA foi apagado (§12).
    */
   const contributionCard = (contribution: RadarExpertContributionRecord, brief: RadarBriefRecord | null) => {
@@ -1311,30 +1316,31 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     const editandoEste = editandoClassificacao === contribution.id;
     const ocupado = decidindo === contribution.id;
 
-    return <article className="rounded-md border border-divider bg-surface p-3" key={contribution.id} data-testid="radar-specialist-review-contribution">
+    return <article className="min-w-0 space-y-2 rounded-md border border-divider bg-surface p-2" key={contribution.id} data-testid="radar-specialist-review-contribution">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h5 className="text-sm font-semibold text-foreground">{expertName(contribution.expertId)} · {canalDaContribuicao(contribution)}</h5>
-          <p className="mt-1 text-sm text-text-muted">{formatDate(contribution.receivedAt)}{contributionDuration(contribution) ? ` · ${contributionDuration(contribution)}` : ""} · {processingStatusLabel(contribution.processingStatus)}</p>
+          <p className="text-sm text-text-muted">{formatDate(contribution.receivedAt)}{contributionDuration(contribution) ? ` · ${contributionDuration(contribution)}` : ""} · {processingStatusLabel(contribution.processingStatus)}</p>
         </div>
         <span className="shrink-0 rounded-full border border-divider px-2 py-1 text-sm text-text-muted" data-testid="radar-specialist-decision-state">{RADAR_SPECIALIST_DECISION_LABELS[review.decision]}</span>
       </div>
 
       {/* O ORIGINAL É A AUTORIDADE DE FIDELIDADE — recolhido, jamais substituído. */}
-      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Resposta original</p>
-      <details className="mt-1 rounded-md border border-divider p-2" data-testid="radar-specialist-original-text"><summary className="cursor-pointer text-sm text-text-muted">Ver texto completo</summary><p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-foreground">{originalText}</p></details>
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+        <details className="min-w-0" data-testid="radar-specialist-original-text"><summary className={disclosure}>Ver texto completo</summary><p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-foreground">{originalText}</p></details>
+        {contribution.provider === "platform" && editandoTexto?.id !== contribution.id && <button type="button" className="min-h-8 text-sm text-context-accent underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-focus" onClick={() => setEditandoTexto({ id: contribution.id, texto: extracao.originalText || "" })} data-testid="radar-specialist-edit-text-open">Editar texto</button>}
+      </div>
 
-      {contribution.provider === "platform" && (editandoTexto?.id === contribution.id
-        ? <div className="mt-2 space-y-2" data-testid="radar-specialist-edit-text">
+      {contribution.provider === "platform" && editandoTexto?.id === contribution.id
+        && <div className="space-y-2" data-testid="radar-specialist-edit-text">
           <label className="block text-sm text-foreground">Editar o parecer
-            <textarea value={editandoTexto.texto} onChange={event => setEditandoTexto({ id: contribution.id, texto: event.target.value })} rows={6} disabled={salvandoTexto} className="mt-1 min-h-32 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm leading-6 text-foreground" />
+            <textarea value={editandoTexto.texto} onChange={event => setEditandoTexto({ id: contribution.id, texto: event.target.value })} rows={3} disabled={salvandoTexto} className="mt-1 block w-full resize-y rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm leading-5 text-foreground" />
           </label>
           <div className="flex flex-wrap gap-2">
             <button type="button" className={primaryAction} disabled={salvandoTexto || !editandoTexto.texto.trim()} onClick={() => void salvarTexto(contribution)}>{salvandoTexto ? "Salvando…" : "Salvar parecer"}</button>
             <button type="button" className={action} disabled={salvandoTexto} onClick={() => setEditandoTexto(null)}>Cancelar</button>
           </div>
-        </div>
-        : <button type="button" className={`${action} mt-2`} onClick={() => setEditandoTexto({ id: contribution.id, texto: extracao.originalText || "" })} data-testid="radar-specialist-edit-text-open">Editar texto</button>)}
+        </div>}
       {desfechoDoTexto?.id === contribution.id && <p className={`mt-2 text-sm ${desfechoDoTexto.ok ? "text-success" : "text-warning"}`} role="status">{desfechoDoTexto.message}</p>}
 
       {/*
@@ -1344,8 +1350,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
         * aceitar automaticamente como evidência. As duas coisas convivem: a
         * sugestão aparece pronta e corrigível, e nenhuma delas decide nada.
         */}
-      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Contribuição organizada</p>
-      <div className="mt-1 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <strong className="text-sm text-foreground" data-testid="radar-specialist-classification">{RADAR_SPECIALIST_CLASSIFICATION_LABELS[extracao.classification]}</strong>
         <span className="text-sm text-text-muted" data-testid="radar-specialist-classification-source">({RADAR_SPECIALIST_CLASSIFICATION_SOURCE_LABELS[extracao.classificationSource]})</span>
         {!editandoEste && <button type="button" className="text-sm text-context-accent underline underline-offset-2" onClick={() => setEditandoClassificacao(contribution.id)} data-testid="radar-specialist-change-classification">Alterar</button>}
@@ -1355,26 +1360,26 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           {RADAR_SPECIALIST_CLASSIFICATIONS.map(item => <option value={item} key={item}>{RADAR_SPECIALIST_CLASSIFICATION_LABELS[item]} — {RADAR_SPECIALIST_CLASSIFICATION_HINTS[item]}</option>)}
         </select>
       </label>}
-      <blockquote className="mt-2 border-l-2 border-divider pl-3 text-sm leading-5 text-foreground" data-testid="radar-specialist-extracted-summary">{extracao.extractedSummary || "Ainda não organizada; não é evidência aprovada."}</blockquote>
+      <blockquote className="border-l-2 border-divider pl-2 text-sm leading-5 text-foreground" data-testid="radar-specialist-extracted-summary">{extracao.extractedSummary || "Ainda não organizada; não é evidência aprovada."}</blockquote>
 
-      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Aplicação no artigo</p>
-      <p className="mt-1 text-sm text-text-muted" data-testid="radar-specialist-editorial-use">{extracao.editorialUse}{manual ? " (associação manual)" : ""}</p>
+      <p className="text-sm text-text-muted"><strong className="font-medium">Aplicação no artigo</strong> · <span data-testid="radar-specialist-editorial-use">{extracao.editorialUse}{manual ? " (associação manual)" : ""}</span></p>
 
       {/*
-        * AS QUATRO DECISÕES — e cada clique é uma escrita remota (§6 e §13).
+        * Cada decisão usa o mesmo gravador e a mesma releitura (§6 e §13).
         *
         * Sem texto legível não há o que aceitar: um áudio ainda em transcrição
         * não pode virar evidência, porque ninguém leu o que ele diz. Rejeitar,
         * esse, continua possível — recusar não exige ler o conteúdo inteiro.
         */}
-      <div className="mt-3 flex flex-wrap gap-2">{DECISOES.map(item => <button
+      <div className="flex flex-wrap gap-1">{DECISOES.map(item => <span key={item.value} className="inline-flex max-w-full items-center gap-1"><button
         type="button"
-        key={item.value}
         className={review.decision === item.value ? primaryAction : action}
         onClick={() => void registrarDecisao(contribution, { decision: item.value })}
         disabled={ocupado || (item.value !== "REJECTED" && !verbatimText)}
         data-testid={`radar-specialist-decision-${item.value}`}
-      >{ocupado ? "Gravando…" : item.label}</button>)}</div>
+      >{ocupado ? "Gravando…" : item.label}</button>
+        {item.value === "MAIN_SUBJECT" && <InfoHint title={item.label} description="Leva o texto para o corpo do artigo, combinado com as evidências da SERP e dentro do assunto definido pelo Arquiteto." />}
+      </span>)}</div>
 
       {/*
         * NENHUM CLIQUE TERMINA EM SILÊNCIO — §6.
@@ -1391,7 +1396,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
 
       {review.decision === "QUOTE_CANDIDATE" && extracao.quoteCandidate && <blockquote className="mt-3 border-l-2 border-context-accent pl-3 text-sm leading-5 text-foreground" data-testid="radar-specialist-quote">“{extracao.quoteCandidate}”<footer className="mt-1 text-text-muted">Trecho original preservado; timestamps só aparecem quando fornecidos pelo provider.</footer></blockquote>}
 
-      <details className="mt-3 rounded-md border border-divider p-2" data-testid="radar-specialist-contribution-advanced"><summary className="cursor-pointer text-sm font-semibold text-text-muted">Detalhes avançados</summary>
+      <details className="border-t border-divider pt-1" data-testid="radar-specialist-contribution-advanced"><summary className={disclosure}>Detalhes avançados</summary>
         {/*
           * A ASSOCIAÇÃO MANUAL É EXCEÇÃO, E POR ISSO MORA AQUI — §4.
           *
@@ -1421,7 +1426,10 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
    */
   const assuntoDoArtigo = radarExpertBriefSubjectOf(context.articleDna);
 
-  return <section className="space-y-3" aria-label="ExpertBrief do artigo selecionado" data-testid="radar-expert-brief-panel">
+  const temTrabalhoDeRevisao = reviewPoints.length > 0 || pautasAvulsas.length > 0 || Boolean(selectedExpert && draftOpen);
+  const revisaoLadoALado = !temTrabalhoDeRevisao && articleContributions.length > 0;
+
+  return <section className={`mx-auto grid w-full max-w-7xl items-start gap-2 ${revisaoLadoALado ? "xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" : ""}`} aria-label="ExpertBrief do artigo selecionado" data-testid="radar-expert-brief-panel">
     {/*
       * O CABEÇALHO RESPONDE UMA PERGUNTA SÓ: em que pé está o especialista.
       *
@@ -1431,9 +1439,12 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       * está, e precisa saber se há ponto preparado, se alguém pediu, e se
       * respondeu. Uma linha, com os números que já vêm do banco.
       */}
-    <header className={surface} data-testid="radar-specialist-header">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="text-base font-semibold text-foreground">Especialista</h3>
+    <header className="col-span-full rounded-md border border-divider bg-surface-subtle px-3 py-2" data-testid="radar-specialist-header">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h3 className="text-base font-semibold text-foreground">Especialista</h3>
+          <p className="text-sm text-text-muted" data-testid="radar-specialist-state-line">{estadoOperacional}</p>
+        </div>
         {/*
           * "RESPOSTA" É A MENSAGEM QUE CHEGOU, não a pauta que foi respondida.
           *
@@ -1446,10 +1457,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           * pautas voltaram", que é outra pergunta e tem outros consumidores.
           */}
         <p className="text-sm text-text-muted" data-testid="radar-specialist-counters">{counters.prepared} ponto(s) preparado(s) · {counters.sent} enviado(s) · {articleContributions.length} resposta(s) · {counters.accepted} aceita(s)</p>
-      </div>
-      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <p className="text-sm text-text-muted" data-testid="radar-specialist-state-line">{estadoOperacional}</p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/*
             * "ATUALIZANDO…" NÃO APAGA O QUE ESTÁ NA TELA — §8.
             *
@@ -1462,14 +1470,14 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           <button type="button" className={action} onClick={() => leituraDaArea.refresh()} data-testid="radar-specialist-refresh">Atualizar</button>
         </div>
       </div>
-      {assuntoDoArtigo && <div className="mt-2 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-specialist-subject">
+      {assuntoDoArtigo && <div className="mt-2 border-t border-divider pt-2" data-testid="radar-specialist-subject">
         <p className="text-sm text-foreground"><span className="font-semibold">{RADAR_EXPERT_SUBJECT_LABEL}:</span> {assuntoDoArtigo.phrase}</p>
         {assuntoDoArtigo.note && <p className="mt-1 text-sm text-text-muted">Nota: {assuntoDoArtigo.note}</p>}
         <p className="mt-1 text-sm text-foreground" data-testid="radar-specialist-subject-request"><span className="font-semibold">{RADAR_EXPERT_SUBJECT_QUESTION_LABEL}:</span> {assuntoDoArtigo.question}</p>
       </div>}
     </header>
 
-    {loading && <p className={surface + " text-sm text-text-muted"}>Carregando especialistas utilizáveis desta Marca…</p>}
+    {loading && <p className={surface + " col-span-full text-sm text-text-muted"}>Carregando especialistas utilizáveis desta Marca…</p>}
 
     {/*
       * AS DUAS COLUNAS — SPECIALIST_1 · §7, o mesmo princípio de Vídeos.
@@ -1480,41 +1488,8 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       *
       * A ordem do DOM é a ordem do mobile (§9): entradas, pontos, resultado.
       */}
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" data-testid="radar-specialist-operational-grid">
-      <div className="space-y-3 min-w-0" data-testid="radar-specialist-entries-column">
-        
-        {!loading && experts.length > 0 && <section className={surface}>
-          <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">ENTRADAS / RESPOSTAS DO ESPECIALISTA</h4>
-          {/*
-            * O SELETOR MANUAL SAIU DA VISÃO NORMAL — SPECIALIST_2.1.1 · §8.
-            *
-            * Ele pertence ao fluxo anterior, em que alguém cadastrava um
-            * especialista antes de poder perguntar qualquer coisa. No fluxo por
-            * consulta, o participante é criado pelo convite e É a autoridade
-            * daquela consulta: não há o que escolher, e a caixa "Selecionar
-            * especialista" fazia a tela pedir uma ação que não existe mais.
-            *
-            * Continua acessível porque a pauta avulsa ainda é uma ferramenta
-            * legítima — só deixou de competir com a ação principal (§10).
-            */}
-          <details className="mt-3 rounded-md border border-divider p-2" data-testid="radar-specialist-advanced">
-            <summary className="cursor-pointer text-sm font-semibold text-text-muted">Ferramentas avançadas</summary>
-            <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-              <label className="block text-sm text-foreground">Especialista
-                <select aria-label="Selecionar especialista" value={selectedExpertId} onChange={event => selectExpert(event.target.value)} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground">
-                  <option value="">Selecionar especialista</option>
-                  {experts.map(expert => <option value={expert.id} key={expert.id}>{expert.displayName}{expert.specialty ? ` · ${expert.specialty}` : ""}</option>)}
-                </select>
-              </label>
-              <div className="rounded-md border border-divider bg-surface px-3 py-2 text-sm">
-                <span className="block text-text-muted">Canal Telegram</span>
-                <strong className="mt-1 block text-foreground">{selectedExpert ? bindingConfigured ? "Configurado" : "Não vinculado" : "Nenhum selecionado"}</strong>
-              </div>
-            </div>
-            {selectedExpert && <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" className={action} onClick={createDraft}>Criar pauta avulsa</button><span className="text-sm text-text-muted">Fora do ponto de revisão; não substitui a consulta.</span></div>}
-          </details>
-        </section>}
-
+    <div className={`grid items-start gap-2 ${temTrabalhoDeRevisao ? "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" : ""}`} data-testid="radar-specialist-operational-grid">
+      <div className="min-w-0 space-y-2" data-testid="radar-specialist-entries-column">
         {/* O parecer direto não depende de especialista cadastrado: "Eu mesmo" cobre a Marca sem cadastro. */}
         {!loading && <RadarSpecialistDirectEntry
           brandId={brandId} articleId={articleId} articleDnaVersionId={articleDnaVersionId}
@@ -1522,17 +1497,13 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           onSent={() => leituraDaArea.refresh()}
         />}
 
-        <section className={surface} aria-label="Entradas recebidas do especialista">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">RESPOSTAS RECEBIDAS</h4>
-            <span className="text-sm text-text-muted">Readback remoto · {articleContributions.length}</span>
-          </div>
-          {!articleContributions.length && <p className="mt-2 rounded-md border border-divider bg-surface px-3 py-3 text-sm text-text-muted">Nenhuma resposta recebida.</p>}
-          <ul className="mt-3 space-y-2">{articleContributions.map(contribution => {
+        {articleContributions.length > 0 && <details className="border-t border-divider px-2 py-1" aria-label="Entradas recebidas do especialista">
+          <summary className={disclosure}>Respostas recebidas · {articleContributions.length}</summary>
+          <ul className="space-y-2 py-1">{articleContributions.map(contribution => {
             const requirementId = requirementByBriefId.get(contribution.briefId) || null;
             const ponto = requirementId ? requirementById.get(requirementId) : null;
             const verbatimText = contribution.transcriptText || contribution.originalText || "";
-            return <li className="rounded-md border border-divider bg-surface p-3" key={contribution.id} data-testid="radar-specialist-entry">
+            return <li className="rounded-md border border-divider bg-surface p-2" key={contribution.id} data-testid="radar-specialist-entry">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{expertName(contribution.expertId)} · {sourceTypeLabel(contribution.sourceType)}</p>
@@ -1548,14 +1519,45 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
                 * outras respostas para fora da tela, e a coluna deixa de servir
                 * como caixa de entrada.
                 */}
-              {verbatimText && <details className="mt-2 rounded-md border border-divider p-2" data-testid="radar-specialist-entry-transcript"><summary className="cursor-pointer text-sm font-semibold text-text-muted">Ver transcrição completa</summary><p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-text-muted">{verbatimText}</p></details>}
-              <p className="mt-2 text-sm text-text-muted">{ponto ? `Responde ao ponto: ${ponto.topic || ponto.claim || ponto.requirementId}` : requirementId ? `Responde ao ponto ${requirementId}, que não está nesta investigação.` : "Contribuição ainda não associada a um ponto de revisão."}</p>
+              {verbatimText && <details className="mt-1" data-testid="radar-specialist-entry-transcript"><summary className={disclosure}>Ver transcrição completa</summary><p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-text-muted">{verbatimText}</p></details>}
+              <p className="mt-2 text-sm text-text-muted">{ponto ? `Responde ao ponto: ${ponto.topic || ponto.claim || ponto.requirementId}` : requirementId?.startsWith("direto:") ? "Parecer direto" : requirementId ? `Responde ao ponto ${requirementId}, que não está nesta investigação.` : "Contribuição ainda não associada a um ponto de revisão."}</p>
             </li>;
           })}</ul>
-        </section>
+        </details>}
+        {!loading && experts.length > 0 && <div className="border-t border-divider px-2">
+          {/*
+            * O SELETOR MANUAL SAIU DA VISÃO NORMAL — SPECIALIST_2.1.1 · §8.
+            *
+            * Ele pertence ao fluxo anterior, em que alguém cadastrava um
+            * especialista antes de poder perguntar qualquer coisa. No fluxo por
+            * consulta, o participante é criado pelo convite e É a autoridade
+            * daquela consulta: não há o que escolher, e a caixa "Selecionar
+            * especialista" fazia a tela pedir uma ação que não existe mais.
+            *
+            * Continua acessível porque a pauta avulsa ainda é uma ferramenta
+            * legítima — só deixou de competir com a ação principal (§10).
+            */}
+          <details className="py-1" data-testid="radar-specialist-advanced">
+            <summary className={disclosure}>Ferramentas avançadas</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <label className="block text-sm text-foreground">Especialista
+                <select aria-label="Selecionar especialista" value={selectedExpertId} onChange={event => selectExpert(event.target.value)} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground">
+                  <option value="">Selecionar especialista</option>
+                  {experts.map(expert => <option value={expert.id} key={expert.id}>{expert.displayName}{expert.specialty ? ` · ${expert.specialty}` : ""}</option>)}
+                </select>
+              </label>
+              <div className="rounded-md border border-divider bg-surface px-3 py-2 text-sm">
+                <span className="block text-text-muted">Canal Telegram</span>
+                <strong className="mt-1 block text-foreground">{selectedExpert ? bindingConfigured ? "Configurado" : "Não vinculado" : "Nenhum selecionado"}</strong>
+              </div>
+            </div>
+            {selectedExpert && <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" className={action} onClick={createDraft}>Criar pauta avulsa</button><span className="text-sm text-text-muted">Fora do ponto de revisão; não substitui a consulta.</span></div>}
+          </details>
+        </div>}
+
       </div>
 
-      <aside className="space-y-3 min-w-0" data-testid="radar-specialist-review-points-column">
+      <aside className="min-w-0 space-y-2" data-testid="radar-specialist-review-points-column">
         {/*
           * UM CARD POR PONTO — SPECIALIST_3 · §1.
           *
@@ -1569,13 +1571,10 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           * só, e ele EVOLUI: ponto preparado → pauta pronta → pedido enviado →
           * resposta recebida → contribuição a revisar → evidência decidida.
           */}
-        <section className={surface} aria-label="Pontos de revisão deste artigo">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">PONTOS DE REVISÃO</h4>
-            <span className="text-sm text-text-muted">{reviewPoints.length}</span>
-          </div>
-          {!reviewPoints.length && <p className="mt-2 rounded-md border border-divider bg-surface px-3 py-3 text-sm text-text-muted">Nenhum ponto preparado para revisão.</p>}
-          <ul className="mt-3 space-y-2">{reviewPoints.map(point => {
+        <section className={reviewPoints.length ? surface : "border-t border-divider px-2 py-1 text-sm text-text-muted"} aria-label="Pontos de revisão deste artigo">
+          {reviewPoints.length ? <>
+            <h4 className="text-sm font-semibold text-foreground">Pontos de revisão <span className="font-normal text-text-muted">· {reviewPoints.length}</span></h4>
+            <ul className="mt-2 space-y-2">{reviewPoints.map(point => {
             const requisito = requirementById.get(point.requirementId);
             const card = requisito ? radarSpecialistReviewCard(requisito) : null;
             const convite = invites[point.requirementId] || null;
@@ -1712,6 +1711,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
             </div>}
           </li>;
           })}</ul>
+          </> : <p>Nenhum ponto preparado para revisão.</p>}
         </section>
 
         {/*
@@ -1801,20 +1801,13 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       </aside>
     </div>
 
-    {/*
-      * O RESULTADO DA REVISÃO, ORGANIZADO PELO PONTO — §8, largura inteira.
-      *
-      * Original, transcrição, contribuição extraída e a decisão humana não
-      * cabem numa coluna de um terço: é aqui que alguém decide se a resposta
-      * de um profissional vira evidência do artigo.
-      */}
-    <section id="radar-specialist-review-result" className={surface} aria-label="Resultado da revisão do especialista" data-testid="radar-specialist-review-result">
+    {/* Os botões de decisão ficam no resultado, agrupados pelo ponto de revisão. */}
+    <section id="radar-specialist-review-result" className={`min-w-0 space-y-2 px-2 py-1 ${revisaoLadoALado ? "border-t border-divider xl:border-l xl:border-t-0 xl:pl-3" : "border-t border-divider"}`} aria-label="Resultado da revisão do especialista" data-testid="radar-specialist-review-result">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">RESULTADO DA REVISÃO</h4>
-        <span className="text-sm text-text-muted">{selectedEvidenceCount} aceita(s) · {pendingContributionCount} pendente(s)</span>
+        <h4 className="text-sm font-semibold text-foreground">Resultado da revisão</h4>
+        <span className="text-sm text-text-muted">{articleContributions.length ? `${selectedEvidenceCount} aceita(s) · ${pendingContributionCount} pendente(s)` : "Nenhuma resposta recebida."}</span>
       </div>
-      {!articleContributions.length && <p className="mt-2 rounded-md border border-divider bg-surface px-3 py-3 text-sm text-text-muted">A revisão começa quando uma contribuição é recebida.</p>}
-      <div className="mt-3 space-y-4">{resultPoints.map(point => <section className="rounded-md border border-divider bg-surface-subtle p-3" key={point.requirementId} data-testid="radar-specialist-result-point">
+      {resultPoints.map(point => <section className="space-y-2 border-t border-divider pt-2" key={point.requirementId} data-testid="radar-specialist-result-point">
         <div className="flex flex-wrap items-start justify-between gap-2">
           {/*
             * A PERGUNTA ENVIADA, NÃO O DIAGNÓSTICO INTEIRO — §12.
@@ -1827,19 +1820,17 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           <span className="shrink-0 rounded-full border border-divider px-3 py-1 text-sm text-foreground">{point.stateLabel}</span>
         </div>
         <p className="mt-2 text-sm text-text-muted">Especialista: {expertName(point.expertId)}</p>
-        <div className="mt-3 space-y-3">{(contributionsByRequirement.get(point.requirementId) || []).map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
-      </section>)}</div>
-      {unassignedContributions.length > 0 && <section className="mt-4 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-specialist-result-unassigned">
+        <div className="space-y-2">{(contributionsByRequirement.get(point.requirementId) || []).map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
+      </section>)}
+      {unassignedContributions.length > 0 && <section className="space-y-2" data-testid="radar-specialist-result-unassigned">
         <h5 className="text-sm font-semibold text-foreground">Respostas sem ponto de revisão associado</h5>
-        <p className="mt-1 text-sm text-text-muted">Chegaram por pautas que não nasceram de um ponto preparado. A associação a um requisito não é feita automaticamente sem evidência suficiente.</p>
-        <div className="mt-3 space-y-3">{unassignedContributions.map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
+        {needOptions.length > 0 && <p className="text-sm text-text-muted">Se necessário, associe a resposta em Detalhes avançados.</p>}
+        <div className="space-y-2">{unassignedContributions.map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
       </section>}
-      {directContributions.length > 0 && <section className="mt-4 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-specialist-result-direct">
-        <h5 className="text-sm font-semibold text-foreground">Pareceres diretos (fechamento, CTA, diretriz)</h5>
-        <p className="mt-1 text-sm text-text-muted">Escritos na plataforma. O do próprio especialista já entra aceito; aqui dá para mudar a decisão e reeditar o texto.</p>
-        <div className="mt-3 space-y-3">{directContributions.map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
+      {directContributions.length > 0 && <section className="space-y-2" data-testid="radar-specialist-result-direct">
+        <h5 className="text-sm font-semibold text-foreground">Pareceres diretos</h5>
+        <div className="space-y-2">{directContributions.map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
       </section>}
-      {articleContributions.length > 0 && <p className="mt-3 text-sm text-text-muted">A contribuição remota não vira ExpertEvidence automaticamente.</p>}
     </section>
 
     {/*
@@ -1854,7 +1845,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       * Um disclosure, não vários: uma fileira de accordions recria exatamente o
       * muro de texto que este gate veio derrubar.
       */}
-    <details className="rounded-md border border-divider p-3" data-testid="radar-specialist-provenance"><summary className="cursor-pointer text-sm font-semibold text-text-muted">Proveniência / detalhes técnicos</summary>
+    <details className="col-span-full border-t border-divider px-2 py-1" data-testid="radar-specialist-provenance"><summary className={disclosure}>Proveniência / detalhes técnicos</summary>
       <h5 className="mt-3 text-sm font-semibold uppercase tracking-wide text-foreground">NECESSIDADES DO RADAR</h5>
       <div className="mt-2 flex flex-wrap gap-2">{context.serpNeeds.length ? context.serpNeeds.map((need, index) => <span className="rounded-full border border-divider px-3 py-1 text-sm text-text-muted" key={`${need}:${index}`}>{need}</span>) : <span className="text-sm text-text-muted">Nenhuma necessidade registrada.</span>}</div>
       <h5 className="mt-4 text-sm font-semibold uppercase tracking-wide text-foreground">LACUNAS OBSERVADAS</h5>

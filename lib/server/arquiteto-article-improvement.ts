@@ -22,7 +22,8 @@ import { applyDeclaredPlanToArticleDna, applySerpSupportBasisProvenance, declare
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { identityPrincipalSerpSentence, serpCollectionAllowed } from "@/lib/arquiteto/article-batch-serp";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
-import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, targetPrincipalIsIdentity, planArticleImprovements, improvementEditorialFit, isListReading, isCopyLineReading, serpSupportedMembers, improvementDiscoverySeeds, improvementIdeaOnCopyLine, improvementSiloContext, IMPROVEMENT_ARTICLE_MAX_KEYWORDS, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence, type ImprovementSerpVocabulary } from "@/lib/arquiteto/article-improvement";
+import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, targetPrincipalIsIdentity, planArticleImprovements, improvementEditorialFit, publishedPrincipalScopeConflict, publishedSlugConflict, readPublishedSerpScope, isListReading, isCopyLineReading, serpSupportedMembers, improvementDiscoverySeeds, improvementIdeaOnCopyLine, improvementSiloContext, IMPROVEMENT_ARTICLE_MAX_KEYWORDS, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence, type ImprovementSerpVocabulary } from "@/lib/arquiteto/article-improvement";
+import { slugTextOf } from "@/lib/arquiteto/published-slug-fit";
 import { buildImprovementAiPrompt, editorialAiRecord, improvementAiEligibleTargets, improvementAiList, improvementAiTargets, IMPROVEMENT_AI_TIMEOUT_MS, validateImprovementAiPicks, type ImprovementEditorialAi } from "@/lib/arquiteto/article-improvement-ai";
 import { readPageRanking, rankingBlocksSwap } from "@/lib/arquiteto/published-differentiation";
 import { buildSerpSubjectIndex, SERP_SUBJECT_LENS_LABELS } from "@/lib/arquiteto/serp-subject-overlap";
@@ -210,7 +211,7 @@ function sourceHash(target: ImprovementTarget, workspace: Workspace, rows: Map<s
     ...(target.declaredPrincipalId ? { declaredPrincipalId: target.declaredPrincipalId } : {}), ...(target.declaredPlanPending ? { declaredPlanPending: true } : {}),
     // 2026-10-18 · o Assunto pela principal (SDD 2026-10-18 §6.3-a): o Assunto da página e o volume dela mudam o artigo.
     // Texto, não objeto: a execução volta do jsonb com as chaves reordenadas (a impressão digital não pode depender da ordem).
-    ...(target.principalSubject ? { principalSubject: `${target.principalSubject.keywordId}:${target.principalSubject.volumeState}` } : {}), ...(target.currentSubjectKeywordId ? { currentSubjectKeywordId: target.currentSubjectKeywordId } : {}) };
+    ...(target.principalSubject ? { principalSubject: `${target.principalSubject.keywordId}:${target.principalSubject.volumeState}:${target.principalSubject.declared !== false}` } : {}), ...(target.currentSubjectKeywordId ? { currentSubjectKeywordId: target.currentSubjectKeywordId } : {}) };
   return hash({ target: identity, article: article?.contentHash ?? null, members: target.memberIds.map(member) });
 }
 /*
@@ -265,8 +266,18 @@ async function readInputs(context: PipelineContext, requested?: string[], groupF
     const entradaDaPagina = assuntoDaPagina.declared ? resolveKeywordSubject(pacoteDaPagina).entry : null;
     const volumeDaPagina = principalSubjectStanding({ volume_search: row.volume_search ?? null, volume_source: row.volume_source ?? object(row.demandEvidence).source ?? null, analise_semantica: object(row.analise_semantica) }, new Date());
     const paginaEhOAssunto = article?.payload.subject?.keywordId === page.keywordId && !members.includes(page.keywordId);
-    const target: ImprovementTarget = { id, kind: "published", theme: assuntoDaPagina.declared ? assuntoDaPagina.phrase : row.keyword, note: assuntoDaPagina.declared ? entradaDaPagina?.details ?? assuntoDaPagina.note ?? null : null, primaryId: article?.payload.principalKeywordId ?? row.id, post: publishedPrimaryPostOf(row.primaryKeywordPolicy ?? page.post), memberIds: paginaEhOAssunto ? [...new Set(members)] : [...new Set([page.keywordId, ...members])], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? page.slug ?? (page.url ? new URL(page.url).pathname.split("/").filter(Boolean).at(-1) ?? null : null), url: page.url, canonical: article?.payload.canonical ?? page.canonical ?? page.url, signals: signals(row),
-      ...(assuntoDaPagina.declared && !volumeDaPagina.outOfScope ? { principalSubject: { keywordId: page.keywordId, volumeState: volumeDaPagina.volumeState } } : {}),
+    const slug = slugTextOf({ url: page.url, canonical: page.canonical })
+      ?? slugTextOf({ slug: page.slug ?? article?.payload.publishedIdentityRef?.slug });
+    const phrase = assuntoDaPagina.declared ? assuntoDaPagina.phrase : row.keyword;
+    const slugPhrase = slug?.replace(/-/g, " ");
+    const publication = { kind: "published" as const, slug };
+    const fitsPage = !publishedPrincipalScopeConflict(publication, { keyword: phrase })
+      && (!slug || carriesSlugCore(slug, { keyword: phrase, volume: null }));
+    const declarationFits = assuntoDaPagina.declared && fitsPage;
+    const post = publishedPrimaryPostOf(row.primaryKeywordPolicy ?? page.post);
+    const measuredLegacyPage = article && slug && post === "free" && !assuntoDaPagina.declared && volumeDaPagina.volumeState === "zero";
+    const target: ImprovementTarget = { id, ...publication, theme: fitsPage ? phrase : slugPhrase ?? phrase, note: declarationFits ? entradaDaPagina?.details ?? assuntoDaPagina.note ?? null : null, primaryId: article?.payload.principalKeywordId ?? row.id, post, memberIds: paginaEhOAssunto ? [...new Set(members)] : [...new Set([page.keywordId, ...members])], territoryRef: text(row.territoryRef), url: page.url, canonical: article?.payload.canonical ?? page.canonical ?? page.url, signals: signals(row),
+      ...((declarationFits || measuredLegacyPage) && !volumeDaPagina.outOfScope ? { principalSubject: { keywordId: page.keywordId, volumeState: volumeDaPagina.volumeState, declared: declarationFits } } : {}),
       currentSubjectKeywordId: article?.payload.subject?.keywordId ?? null, articleExists: Boolean(article) };
     targets.push(target);
     for (const member of target.memberIds) if (article || !owned.has(member)) owned.set(member, id);
@@ -524,21 +535,37 @@ type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, b
  * como o de qualquer principal (antes, "Claro, Vivo ou TIM" e "Internet, TV Box e
  * streaming" ficavam sem as relacionadas e os domínios da própria SERP).
  */
-async function principalVocabularyOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<Record<string, ImprovementSerpVocabulary>> {
+async function principalVocabularyOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<{
+  vocabulary: Record<string, ImprovementSerpVocabulary>;
+  byKeyword: ReadonlyMap<string, ImprovementSerpVocabulary>;
+}> {
   const porId = new Map(keywords.map(k => [k.id, k]));
   const principais = targets.flatMap(target => {
     const principal = porId.get(target.primaryId ?? "") ?? porId.get(target.declaredPrincipalId ?? "") ?? porId.get(target.planPrincipalId ?? "");
     return principal && !principal.external && (principal.volumeValidated || targetPrincipalIsIdentity(target, principal)) ? [{ targetId: target.id, keywordId: principal.id, keyword: principal.keyword }] : [];
   });
-  if (!principais.length) return {};
+  const publicados = targets.filter(target => target.kind === "published");
+  const consultas = new Map(principais.map(item => [item.keywordId, { keywordId: item.keywordId, keyword: item.keyword }]));
+  for (const candidate of keywords) {
+    if (candidate.external || candidate.published || !candidate.volumeValidated || consultas.has(candidate.id)) continue;
+    if (publicados.some(target => (!candidate.ownerId || candidate.ownerId === target.id)
+      && carriesSlugCore(target.slug, candidate) && !publishedPrincipalScopeConflict(target, candidate))) {
+      consultas.set(candidate.id, { keywordId: candidate.id, keyword: candidate.keyword });
+    }
+  }
+  if (!consultas.size) return { vocabulary: {}, byKeyword: new Map() };
   try {
-    const lido = await readPrincipalSerpVocabulary(context, principais.map(({ keywordId, keyword }) => ({ keywordId, keyword })), new Date());
-    return Object.fromEntries(principais.flatMap(item => { const vocab = lido.get(item.keywordId); return vocab ? [[item.targetId, vocab] as const] : []; }));
-  } catch { return {}; }
+    const byKeyword = await readPrincipalSerpVocabulary(context, [...consultas.values()], new Date());
+    const vocabulary = Object.fromEntries(principais.flatMap(item => {
+      const vocab = byKeyword.get(item.keywordId);
+      return vocab ? [[item.targetId, vocab] as const] : [];
+    }));
+    return { vocabulary, byKeyword };
+  } catch { return { vocabulary: {}, byKeyword: new Map() }; }
 }
 async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<EvidenceRead> {
   const queries = new Map([...targets.map(t => [t.id, t.theme] as const), ...keywords.map(k => [k.id, k.keyword] as const)]);
-  const vocabulary = await principalVocabularyOf(context, targets, keywords);
+  const { vocabulary, byKeyword } = await principalVocabularyOf(context, targets, keywords);
   let cache: Awaited<ReturnType<typeof readPublishedFootprints>>;
   try { cache = await readPublishedFootprints(context, [...queries].map(([keywordId, keyword]) => ({ keywordId, keyword })), new Date()); }
   catch { return { vocabulary, ranking: Object.fromEntries(targets.map(t => [t.id, null])), evidence: targets.flatMap(t => keywords.map(k => ({ targetId: t.id, keywordId: k.id, complete: false, sharedPages: 0, contradiction: false, anchorConclusive: false }))) }; }
@@ -554,7 +581,8 @@ async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[]
   }
   const evidence: ImprovementEvidence[] = targets.flatMap(t => keywords.map(k => {
     const overlap = index.overlap(t.id, k.id);
-    return { targetId: t.id, keywordId: k.id, complete: !missing.has(k.id) && cache.footprints.some(f => f.keywordId === k.id && f.lenses.length === 4), sharedPages: overlap.sharedPageCount ?? 0, contradiction: overlap.strength === "none" && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false), anchorConclusive: overlap.strength !== "unknown" && !missing.has(t.id) && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false) };
+    const publishedSerpScope = readPublishedSerpScope(t, byKeyword.get(k.id));
+    return { targetId: t.id, keywordId: k.id, complete: !missing.has(k.id) && cache.footprints.some(f => f.keywordId === k.id && f.lenses.length === 4), sharedPages: overlap.sharedPageCount ?? 0, contradiction: overlap.strength === "none" && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false), anchorConclusive: overlap.strength !== "unknown" && !missing.has(t.id) && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false), ...(publishedSerpScope ? { publishedSerpScope } : {}) };
   }));
   return { evidence, ranking, vocabulary };
 }
@@ -899,7 +927,8 @@ async function findRun(context: PipelineContext, runId: string) {
   if (result.error) throw result.error;
   if (!result.data) throw refusal("Execução não encontrada nesta marca.");
   const run = result.data.payload as ImprovementRun;
-  if (run.version !== ARTICLE_IMPROVEMENT_VERSION || run.brandId !== context.brandId || run.actorId !== context.actorUserId) throw refusal("Execução incompatível ou pertencente a outro ator.");
+  if (run.brandId !== context.brandId || run.actorId !== context.actorUserId) throw refusal("Execução pertencente a outra marca ou a outro ator.");
+  if (run.version !== ARTICLE_IMPROVEMENT_VERSION) throw refusal("Esta prévia foi preparada por uma versão anterior. Abra “Melhorar publicados…” e prepare novamente.");
   return { id: String(result.data.id), lock: Number(result.data.lock_version), run };
 }
 /**
@@ -1763,6 +1792,10 @@ function rowsBeforeMoves(run: ImprovementRun, proposal: ImprovementProposal, row
 async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, proposal: ImprovementProposal): Promise<Outcome> {
   const context = runtime.context, target = run.targets.find(t => t.id === proposal.targetId)!;
   let input = await readInputs(context, [target.id]);
+  const currentTarget = input.targets.find(item => item.id === target.id);
+  if (target.kind === "published" && (!currentTarget || currentTarget.slug !== target.slug || currentTarget.url !== target.url || currentTarget.canonical !== target.canonical)) {
+    throw refusal("O endereço verificado do publicado mudou desde a prévia. Prepare novamente.");
+  }
   // A variante planejada ainda não tem writer transacional de vínculo. Detecte
   // o Silo pelo território ou pelo artigo corrente ANTES de aceitar a SERP,
   // incorporar keywords ou alterar assignments: a recusa do append, sozinha,
@@ -1792,6 +1825,17 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
     throw refusal("Há gravação parcial desta execução. Prepare uma nova prévia para revisar a composição atual.");
   }
   if (sourceHash(target, input.workspace, input.rows) !== run.sourceHashes[target.id] && sourceHash(target, input.workspace, rowsBeforeMoves(run, proposal, input.rows)) !== run.sourceHashes[target.id]) throw refusal("O artigo, suas keywords ou o Silo mudaram desde a prévia. Prepare novamente.");
+  if (target.kind === "published") {
+    for (const id of proposal.memberIds) {
+      if (id === target.id || id === target.primaryId) continue;
+      const keyword = input.rows.get(id)?.keyword ?? run.keywords.find(candidate => candidate.id === id)?.keyword;
+      if (!keyword) continue;
+      const conflict = id === proposal.principalId
+        ? publishedPrincipalScopeConflict(target, { keyword })
+        : publishedSlugConflict(target, keyword);
+      if (conflict) throw refusal(`“${keyword}” ficou fora do assunto de “${target.theme}”: ${conflict}. Prepare novamente.`);
+    }
+  }
   // 2026-10-19 · a keyword que vem de outro artigo do recorte: a linha de origem não pode ter falhado nesta execução.
   for (const movida of proposal.movedIn ?? []) {
     const origem = run.outcomes.find(o => o.targetId === movida.fromTargetId);
@@ -1907,7 +1951,7 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   const policyContext = payload.primaryKeywordPolicyContext;
   const primaryRow = input.rows.get(principalId)!;
   const previousLabel = input.rows.get(previousPrimaryId)?.keyword ?? target.theme;
-  payload = ArticleDNASchema.parse({ ...payload, principalKeywordId: principalId, keywordReferences: references, secondaryKeywordIds: members.filter(id => id !== principalId), narrativeReinforcementIds: [], ...(switched && payload.kgrIdentity ? { kgrIdentity: { ...payload.kgrIdentity, primaryKeywordId: principalId, principalKeywordDnaId: primaryRow.keywordDnaRef?.entityId ?? principalId, principalKeywordDnaVersionId: primaryRow.keywordDnaRef?.versionId, principalKeywordDnaContentHash: primaryRow.keywordDnaRef?.contentHash, primaryVolume: primaryRow.volume_search ?? null, resultCount: primaryRow.results_allintitle ?? null, kgrValue: primaryRow.kgr_score ?? null, ...(payload.kgrIdentity.isKgrArticle ? { bindingStatus: "candidate", status: "candidate", confirmedBy: undefined, confirmedAt: undefined } : {}) } } : {}), ...(switched && policyContext ? { primaryKeywordPolicyContext: { ...policyContext, currentKeyword: primaryRow.keyword, publishedOriginalKeyword: policyContext.publishedOriginalKeyword ?? previousLabel, actorId: context.actorUserId, decidedAt: now, history: [...(policyContext.history ?? []), { previous: policyContext.policy, next: policyContext.policy, actorId: context.actorUserId, changedAt: now, reason: proposal.subjectKeywordId && proposal.subjectKeywordId === previousPrimaryId ? `Troca aceita na melhoria (volume 0, SDD 2026-10-18): ${previousLabel} vira o Assunto do artigo; ${primaryRow.keyword} assume sem alterar a identidade.` : `Troca aceita na melhoria: ${previousLabel} permanece secundária; ${primaryRow.keyword} assume sem alterar a identidade.` }] } } : {}), volumeStrategy: recalculated.volumeStrategy, keywordStrategy: recalculated.keywordStrategy, primaryKeywordMetrics: recalculated.primaryKeywordMetrics, intentProfile: recalculated.intentProfile, mainIntent: recalculated.mainIntent, angle: proposal.angle || payload.angle, antiCannibalizationBoundary: proposal.exclusions.length ? `Cobrir ${proposal.angle}; deixar ${proposal.exclusions.join("; ")} para as páginas vizinhas.` : payload.antiCannibalizationBoundary, differentiation: [...new Set([...payload.differentiation, proposal.angle])].filter(Boolean), excludedSubjects: [...new Set([...payload.excludedSubjects, ...proposal.exclusions])], coverage: [...new Set([...payload.coverage, ...group.keywords.map(k => k.keyword)])], requiredTopics: [...new Set([...payload.requiredTopics, target.theme])], ...(target.kind === "published" ? { suggestedSlug: target.slug, canonical: target.canonical } : { suggestedSlug: suggestArticleSlug({ principal: primaryRow, siloSlug: target.siloContext?.slug ?? null }) }), ...(principalId !== payload.principalKeywordId ? { primaryKeywordDecision: { status: "confirmed", previousKeywordId: payload.principalKeywordId, selectedKeywordId: principalId, actorId: context.actorUserId, decidedAt: now, reason: proposal.reasons.join(" ") } } : {}) });
+  payload = ArticleDNASchema.parse({ ...payload, principalKeywordId: principalId, keywordReferences: references, secondaryKeywordIds: members.filter(id => id !== principalId), narrativeReinforcementIds: [], ...(switched && payload.kgrIdentity ? { kgrIdentity: { ...payload.kgrIdentity, primaryKeywordId: principalId, principalKeywordDnaId: primaryRow.keywordDnaRef?.entityId ?? principalId, principalKeywordDnaVersionId: primaryRow.keywordDnaRef?.versionId, principalKeywordDnaContentHash: primaryRow.keywordDnaRef?.contentHash, primaryVolume: primaryRow.volume_search ?? null, resultCount: primaryRow.results_allintitle ?? null, kgrValue: primaryRow.kgr_score ?? null, ...(payload.kgrIdentity.isKgrArticle ? { bindingStatus: "candidate", status: "candidate", confirmedBy: undefined, confirmedAt: undefined } : {}) } } : {}), ...(switched && policyContext ? { primaryKeywordPolicyContext: { ...policyContext, currentKeyword: primaryRow.keyword, publishedOriginalKeyword: policyContext.publishedOriginalKeyword ?? previousLabel, actorId: context.actorUserId, decidedAt: now, history: [...(policyContext.history ?? []), { previous: policyContext.policy, next: policyContext.policy, actorId: context.actorUserId, changedAt: now, reason: proposal.subjectKeywordId && proposal.subjectKeywordId === previousPrimaryId ? `Troca aceita na melhoria (volume 0, SDD 2026-10-18): ${previousLabel} vira o Assunto do artigo; ${primaryRow.keyword} assume sem alterar a identidade.` : `Troca aceita na melhoria: ${previousLabel} permanece secundária; ${primaryRow.keyword} assume sem alterar a identidade.` }] } } : {}), volumeStrategy: recalculated.volumeStrategy, keywordStrategy: recalculated.keywordStrategy, primaryKeywordMetrics: recalculated.primaryKeywordMetrics, intentProfile: recalculated.intentProfile, mainIntent: recalculated.mainIntent, angle: target.kind === "published" ? target.theme : proposal.angle || payload.angle, antiCannibalizationBoundary: proposal.exclusions.length ? `Cobrir ${proposal.angle}; deixar ${proposal.exclusions.join("; ")} para as páginas vizinhas.` : payload.antiCannibalizationBoundary, differentiation: [...new Set([...payload.differentiation, proposal.angle])].filter(Boolean), excludedSubjects: [...new Set([...payload.excludedSubjects, ...proposal.exclusions])], coverage: [...new Set([...(target.kind === "published" ? [target.theme] : payload.coverage), ...group.keywords.map(k => k.keyword)])], requiredTopics: [...new Set([...payload.requiredTopics.filter(topic => !publishedSlugConflict(target, topic)), target.theme])], suggestedSlug: target.kind === "published" ? target.slug ?? payload.suggestedSlug : suggestArticleSlug({ principal: primaryRow, siloSlug: target.siloContext?.slug ?? null }), ...(principalId !== payload.principalKeywordId ? { primaryKeywordDecision: { status: "confirmed", previousKeywordId: payload.principalKeywordId, selectedKeywordId: principalId, actorId: context.actorUserId, decidedAt: now, reason: proposal.reasons.join(" ") } } : {}) });
   /*
    * 2026-10-18 · A PÁGINA VIRA O ASSUNTO (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-d/f, X12 SUBSTITUÍDO):
    * a página publicada com Assunto no pacote aprovado fica como o `subject` do ArticleDNA — fora das keywords quando a

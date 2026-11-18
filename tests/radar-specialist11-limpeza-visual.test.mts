@@ -302,7 +302,11 @@ test("SPECIALIST_1.1 · os estados vazios são curtos", async () => {
 
     assert.ok(visivel.includes("Nenhuma consulta criada ainda."));
     assert.ok(visivel.includes("Nenhuma resposta recebida."));
-    assert.ok(visivel.includes("A revisão começa quando uma contribuição é recebida."));
+    assert.equal((visivel.match(/Nenhuma resposta recebida\./g) || []).length, 1);
+    assert.doesNotMatch(tela.get("radar-specialist-operational-grid").className, /lg:grid-cols-/, "sem atividade de revisão não reserva uma coluna vazia");
+    const editor = tela.get("radar-specialist-direct-text") as HTMLTextAreaElement;
+    assert.equal(editor.getAttribute("rows"), "3");
+    assert.match(editor.className, /\bresize-y\b/);
 
     /* A frase longa de antes não sobreviveu em lugar nenhum. */
     assert.ok(!visivel.includes("Nenhuma entidade é criada silenciosamente pelo Radar."));

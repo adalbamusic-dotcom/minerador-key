@@ -3,6 +3,7 @@ import type { ArticleDNA, ProductEvidenceDNA, SiloDNA, VersionEnvelope } from ".
 import { RADAR_INTENT_NOT_CONCLUDED, radarDeclaredArticleIntent } from "./editorial-identity.ts";
 import { radarSubjectDeepeningRequest } from "./declared-subject.ts";
 import type { RadarCompetitiveReport } from "./competitive-report.ts";
+import type { RadarExpertEvidenceReview } from "./expert-evidence.ts";
 import type {
   RadarR4AmazonState,
   RadarR4ExistingContentRecord,
@@ -316,7 +317,7 @@ export type RadarR6ExpertEvidenceInput = {
   summary: string;
   reviewed: boolean;
   contributionId?: string;
-  decision?: "pending" | "accepted" | "support" | "quote" | "rejected";
+  decision?: RadarExpertEvidenceReview["decision"];
   classification?: string | null;
   need?: string | null;
   sourceType?: "TEXT" | "VOICE" | "AUDIO" | "DOCUMENT";

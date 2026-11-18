@@ -6,7 +6,7 @@ import { normalizeBrandSerpLocationText, type BrandSerpTerritory } from "../marc
 import type { GoogleAdsHistoricalMetric } from "../google/ads/contracts.ts";
 import { principalSubjectStanding, resolveKeywordSubject, subjectPhraseOf } from "../minerador/keyword-subject.ts";
 
-export const ARTICLE_IMPROVEMENT_VERSION = 1;
+export const ARTICLE_IMPROVEMENT_VERSION = 3;
 export const ARTICLE_IMPROVEMENT_LABEL = "Melhorar publicados e formar Assuntos";
 export type ImprovementKeyword = {
   id: string; keyword: string; volume: number | null; volumeValidated: boolean;
@@ -98,9 +98,10 @@ export type ImprovementTarget = {
   /**
    * 2026-10-18 · O ASSUNTO PELA PRINCIPAL (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-a): a keyword que
    * é o Assunto do artigo — no publicado, a PÁGINA (o Assunto dela, lido do pacote aprovado do Minerador) — e o estado do
-   * volume dela pela régua única do Minerador (`principalSubjectStanding`). Ausente = o publicado sem Assunto, como antes.
+   * volume dela pela régua única do Minerador (`principalSubjectStanding`). Num legado Livre de volume zero, o slug
+   * fornece o recorte editorial, mas `declared: false` impede gravar um vínculo de Assunto sem pacote declarado.
    */
-  principalSubject?: { keywordId: string; volumeState: "zero" | "low" | "with_volume" | "unknown" } | null;
+  principalSubject?: { keywordId: string; volumeState: "zero" | "low" | "with_volume" | "unknown"; declared?: boolean } | null;
   /** 2026-10-18 · a keyword que o ArticleDNA vigente já tem como `subject` (`null` = sem Assunto no DNA). */
   currentSubjectKeywordId?: string | null;
   /** 2026-10-18 · o alvo já tem ArticleDNA (o primeiro DNA do publicado nasce com a página entre as keywords; a página vira o Assunto na versão seguinte). */
@@ -125,6 +126,7 @@ export type ImprovementSerpVocabulary = { keywordId: string; questions: string[]
 export type ImprovementEvidence = {
   targetId: string; keywordId: string; complete: boolean;
   sharedPages: number; contradiction: boolean; anchorConclusive: boolean;
+  publishedSerpScope?: { matchingTitles: number; totalTitles: number };
 };
 export type ImprovementProposal = {
   targetId: string; kind: ImprovementTarget["kind"]; theme: string;
@@ -267,8 +269,8 @@ const sameAudience = (a: string, b: string) => {
 
 /** A structured editorial match needs entity plus problem, audience or outcome. */
 export function improvementEditorialFit(target: ImprovementTarget, candidate: ImprovementKeyword): { fits: boolean; reason: string; conflict?: boolean; conflictKind?: "intent" } {
-  // 2026-10-19 · a cidade da marca não troca a entidade do slug (SDD 2026-10-18 R12: "julgada pela intenção na SERP de São Paulo, não pela palavra").
-  if (target.kind === "published" && classifySlugFit(target.slug ?? "", withoutBrandLocality(candidate.keyword, target.brandTerritory)).fit === "contradicts") return { fits: false, conflict: true, reason: "A candidata contradiz a entidade do slug publicado." };
+  const conflitoDoSlug = publishedSlugConflict(target, candidate.keyword);
+  if (conflitoDoSlug) return { fits: false, conflict: true, reason: conflitoDoSlug };
   const a = target.signals, b = candidate.signals;
   const intentA = intentComparisonKey(a.intent), intentB = intentComparisonKey(b.intent);
   if (a.audience && b.audience && !sameAudience(a.audience, b.audience)) return { fits: false, conflict: true, reason: "Públicos distintos no DNA; não há evidência para reuni-los." };
@@ -296,6 +298,14 @@ function nicheWords(value: string): Set<string> {
   const tokens = key(value.replace(/[-/]/g, " ")).split(/[^a-z0-9]+/).filter(Boolean);
   const at = tokens.indexOf("para");
   return at < 0 ? new Set() : aliased(slugWords(tokens.slice(at + 1).join(" ")), NICHE_ALIASES);
+}
+
+/** Um público ou uma entidade incompatível com o slug barra principal e reforço. */
+export function publishedSlugConflict(target: Pick<ImprovementTarget, "kind" | "slug" | "brandTerritory">, keyword: string): string | null {
+  if (target.kind !== "published" || !target.slug) return null;
+  const normalizarPublico = (value: string) => key(value).replace(/\bconsultorios?\b/g, "clinica");
+  const leitura = classifySlugFit(normalizarPublico(target.slug), normalizarPublico(withoutBrandLocality(keyword, target.brandTerritory)));
+  return leitura.fit === "contradicts" ? `Contradiz o slug publicado: ${leitura.reason}` : null;
 }
 /*
  * Busca local (caso real, 2026-09-30): "agência de marketing em são paulo"
@@ -379,7 +389,7 @@ export function editorialAiBarrier(target: ImprovementTarget, candidate: Improve
   const targetNiche = new Set([...nicheWords(subject), ...nicheWords(target.theme)]);
   const targetAll = aliased(slugWords(`${target.theme} ${subject.replace(/-/g, " ")}`), NICHE_ALIASES);
   if (candidateNiche.size && targetNiche.size && ![...candidateNiche].some(word => targetNiche.has(word) || targetAll.has(word))) return "Outro nicho declarado na keyword: não é o público deste artigo.";
-  return null;
+  return publishedSlugConflict(target, candidate.keyword);
 }
 
 /**
@@ -405,7 +415,8 @@ export function editorialAiPrincipalBlock(target: ImprovementTarget, current: Im
   if (target.kind !== "published") return null;
   if (blocksSwap === true) return "a página aparece no Google (página que ranqueia não troca de principal)";
   if (blocksSwap !== false) return "não deu para reler se a página ranqueia";
-  if (classifySlugFit(target.slug ?? "", candidate.keyword).fit === "contradicts") return "ela troca a entidade do slug publicado";
+  const conflitoDoSlug = publishedPrincipalScopeConflict(target, candidate);
+  if (conflitoDoSlug) return conflitoDoSlug;
   if (!carriesSlugCore(target.slug, candidate) && !coversSlugSubject(target.slug, candidate.keyword)) return "ela não leva o núcleo do slug publicado";
   return null;
 }
@@ -829,6 +840,8 @@ export function principalSubjectConflictDetail(target: ImprovementTarget, candid
   // 2026-10-19 · a cidade da própria marca não é busca local de fora (SDD localidade D11).
   const local = foreignLocalSearch(target, candidate.keyword, alvo);
   if (local) return outro(`busca local (“${local}”)`);
+  const conflitoDoSlug = publishedSlugConflict(target, candidate.keyword);
+  if (conflitoDoSlug) return outro(conflitoDoSlug);
   for (const [restricao, contraria] of RESTRICOES) {
     const doAlvo = alvo.match(restricao)?.[0];
     if (doAlvo && contraria.test(frase) && !/\bsem\b/.test(frase)) return outro(`contraria a restrição do Assunto (“${doAlvo}”)`);
@@ -915,12 +928,38 @@ export function principalLosesDefiningModifier(target: Pick<ImprovementTarget, "
   }
   return null;
 }
+
+export function publishedPrincipalScopeConflict(target: Pick<ImprovementTarget, "kind" | "slug" | "brandTerritory">, candidate: Pick<ImprovementKeyword, "keyword">): string | null {
+  if (target.kind !== "published" || !target.slug) return null;
+  return publishedSlugConflict(target, candidate.keyword)
+    ?? principalLosesDefiningModifier({ theme: "", slug: target.slug }, candidate);
+}
+
+/** Sinal editorial dos resultados orgânicos. Perguntas e buscas relacionadas não contam como páginas. */
+export function readPublishedSerpScope(target: ImprovementTarget, vocabulary: ImprovementSerpVocabulary | undefined): ImprovementEvidence["publishedSerpScope"] {
+  if (target.kind !== "published" || !target.slug || !vocabulary || vocabulary.lenses < 4) return undefined;
+  const modifiers = subjectDefiningModifiers({ theme: "", slug: target.slug });
+  const niche = modifiers.filter(item => item.kind === "nicho").flatMap(item => item.words);
+  const qualifier = niche.length ? niche : modifiers.filter(item => item.kind === "negacao").flatMap(item => item.words.slice(-1));
+  const scope = new Set(qualifier.map(nicheFamily));
+  const titles = new Set(vocabulary.titles.map(key).filter(Boolean));
+  if (!scope.size || titles.size < 5) return undefined;
+  const matchingTitles = [...titles].filter(title => {
+    const words = new Set([...copyWords(title)].map(nicheFamily));
+    return [...scope].every(word => words.has(word));
+  }).length;
+  return { matchingTitles, totalTitles: titles.size };
+}
 /** O publicado cujo Assunto é a própria keyword da página (lido do pacote aprovado do Minerador). */
 const assuntoEhAPagina = (target: Pick<ImprovementTarget, "kind" | "principalSubject">) => target.kind === "published" && Boolean(target.principalSubject);
 /** Régua c inteira para a PRINCIPAL: cabe no Assunto e leva o núcleo do slug (com a entidade do DNA). */
 export function principalFitsSubject(target: ImprovementTarget, candidate: Pick<ImprovementKeyword, "keyword" | "signals" | "volume" | "volumeValidated" | "id"> & Partial<ImprovementKeyword>): string | null {
   const conflito = principalSubjectConflict(target, candidate);
   if (conflito) return conflito;
+  if (candidate.id !== target.principalSubject?.keywordId) {
+    const foraDoSlug = publishedPrincipalScopeConflict(target, candidate);
+    if (foraDoSlug) return foraDoSlug;
+  }
   // Sem slug (artigo novo sem slug declarado), o título do Assunto faz as vezes do slug (a mesma régua de `targetSubjectText`).
   const slug = target.slug ?? target.planSlug ?? target.theme.split("/").join(" ");
   /*
@@ -950,7 +989,7 @@ export function publishedCurrentPrincipalHolds(target: ImprovementTarget, curren
 export function principalSwapByVolume(target: ImprovementTarget, current: ImprovementKeyword | null | undefined): boolean {
   // Sem principal (Assunto sem artigo), não é troca: a formação escolhe a principal pela régua de sempre.
   if (!current) return false;
-  // O publicado SEM o Assunto na página espera o "Aprovar e enviar" do Minerador (o volume 0 vira o Assunto lá): até lá, a régua de antes.
+  // Sem o Assunto recebido nem a evidência de volume zero da página Livre, não se libera uma troca por esta régua.
   if (target.kind === "published" && !target.principalSubject) return false;
   if (principalSwapStanding(target, current) !== "swap") return false;
   return !publishedCurrentPrincipalHolds(target, current);
@@ -1630,7 +1669,7 @@ function applySubjectReorganization(original: readonly ImprovementTarget[], reor
     if (rebaixada) {
       const ficou = p.memberIds.includes(rebaixada.keywordId) && p.principalId !== rebaixada.keywordId;
       p.reasons.push(`“${nome(rebaixada.keywordId)}” deixa de ser a principal: ${rebaixada.reason} (régua c; cobrança do dono de 19/10).${ficou ? " Fica como secundária de contexto." : ""}`);
-      if (p.principalId === t.principalSubject?.keywordId) p.subjectKeywordId = t.principalSubject.keywordId;
+      if (p.principalId === t.principalSubject?.keywordId && t.principalSubject.declared !== false) p.subjectKeywordId = t.principalSubject.keywordId;
       mudou = true;
     }
     if (mudou) { p.status = "ready"; p.evidenceBasis = p.evidenceBasis ?? "editorial_and_candidate_serp"; p.reasons = [...new Set(p.reasons)]; }
@@ -1647,7 +1686,18 @@ export function planArticleImprovements(input: {
 }): ImprovementProposal[] {
   const reorg = reorganizePublishedSubjects(input.targets, input.keywords);
   const proposals = planArticleImprovementsCore({ ...input, targets: reorg.targets, keywords: reorg.keywords });
-  return applySubjectReorganization(input.targets, reorg, proposals, new Map(reorg.keywords.map(k => [k.id, k])));
+  const result = applySubjectReorganization(input.targets, reorg, proposals, new Map(reorg.keywords.map(k => [k.id, k])));
+  const lookup = new Map(input.evidence.map(item => [`${item.targetId}:${item.keywordId}`, item.publishedSerpScope]));
+  for (const proposal of result) {
+    if (proposal.kind !== "published" || !proposal.principalId) continue;
+    for (const keywordId of new Set([proposal.currentPrimaryId, proposal.principalId])) {
+      const read = lookup.get(`${proposal.targetId}:${keywordId}`);
+      if (!read) continue;
+      const action = keywordId === proposal.currentPrimaryId ? "Principal atual" : "Candidata à principal";
+      proposal.reasons.push(`${action}: o recorte do slug aparece em ${read.matchingTitles} de ${read.totalTitles} títulos orgânicos distintos nas quatro lentes. ${read.matchingTitles === 0 ? "A amostra não mostrou o recorte nos títulos; confira o público atendido antes de confirmar." : "Sinal editorial para comparar as opções, junto com o parecer de intenção."}`);
+    }
+  }
+  return result;
 }
 
 function planArticleImprovementsCore(input: {
@@ -1730,6 +1780,10 @@ function planArticleImprovementsCore(input: {
     const kept = target.memberIds.filter(id => fixed.get(id) === target.id);
     let added = [...owners].filter(([id, owner]) => owner === target.id && !kept.includes(id)).map(([id]) => id);
     const candidates = [...kept, ...added].filter(id => eligible.some(e => e.targetId === target.id && e.keywordId === id)).map(id => byId.get(id)!).sort((a, b) => (eligible.find(e => e.targetId === target.id && e.keywordId === a.id)?.tier ?? 2) - (eligible.find(e => e.targetId === target.id && e.keywordId === b.id)?.tier ?? 2) || b.volume! - a.volume!);
+    const scopeScore = (id: string) => {
+      const read = observations.get(`${target.id}:${id}`)?.publishedSerpScope;
+      return read ? read.matchingTitles / read.totalTitles : 0;
+    };
     const old = improvementCurrentPrincipal(target, byId);
     /*
      * Publicado: só a principal SEM volume é Livre para trocar (dono,
@@ -1785,10 +1839,14 @@ function planArticleImprovementsCore(input: {
           const x = daLinhaDeCopy(a.id)?.match, y = daLinhaDeCopy(b.id)?.match, na = levaONucleo(a), nb = levaONucleo(b);
           return Number(nb) - Number(na)
             || (pilar && na && nb ? copyWords(a.keyword).size - copyWords(b.keyword).size || b.volume! - a.volume! : 0)
+            || scopeScore(b.id) - scopeScore(a.id)
             || (y?.cover ?? 0) - (x?.cover ?? 0) || (y?.serp ?? 0) - (x?.serp ?? 0) || b.volume! - a.volume!;
         })
       : null;
-    const principalId = target.declaredPrincipalId ?? (needsPrimary ? (pelaLinha ? pelaLinha[0]?.id ?? target.primaryId : pilarCabeca ? target.primaryId : candidates[0]?.id ?? target.primaryId) : target.primaryId);
+    const byFit = target.kind === "published"
+      ? candidates.filter(candidate => !publishedPrincipalScopeConflict(target, candidate)).sort((a, b) => scopeScore(b.id) - scopeScore(a.id))[0]
+      : candidates[0];
+    const principalId = target.declaredPrincipalId ?? (needsPrimary ? (pelaLinha ? pelaLinha[0]?.id ?? target.primaryId : pilarCabeca ? target.primaryId : byFit?.id ?? target.primaryId) : target.primaryId);
     /*
      * 2026-10-17 · no Suporte do plano, a cabeça mais ampla que a principal não
      * fica: ela é do Pilar. Com a troca, compara com a NOVA principal (mais
@@ -1997,19 +2055,20 @@ function enforcePageSubject(targets: readonly ImprovementTarget[], proposals: Im
   targets.forEach((target, index) => {
     const p = proposals[index];
     const pagina = target.kind === "published" && target.articleExists !== false ? target.principalSubject?.keywordId ?? null : null;
-    if (!pagina || !p.principalId || !target.territoryRef) return;
+    const attach = target.principalSubject?.declared !== false;
+    if (target.kind !== "published" || !p.principalId || !target.territoryRef) return;
     let mudou = false;
-    if (p.principalId !== pagina) {
-      p.subjectKeywordId = pagina;
+    if (pagina && p.principalId !== pagina) {
+      if (attach) p.subjectKeywordId = pagina;
       if (p.memberIds.includes(pagina)) {
         p.memberIds = p.memberIds.filter(id => id !== pagina);
         if (target.memberIds.includes(pagina) && !p.removeIds.includes(pagina)) p.removeIds = [...p.removeIds, pagina];
       }
       const nomeDaPagina = byId.get(pagina)?.keyword ?? target.theme;
       p.reasons = p.reasons.filter(reason => !(reason.includes(`“${nomeDaPagina}”`) && /fica como secundária/.test(reason)) && !/^Principal mais ampla, com volume: .* a antiga fica como secundária\.$/.test(reason));
-      p.reasons.push(PAGE_BECOMES_SUBJECT_REASON);
+      p.reasons.push(attach ? PAGE_BECOMES_SUBJECT_REASON : "O slug publicado continua a definir o assunto. A frase original da página sai da lista de keywords.");
       mudou = true;
-    } else {
+    } else if (pagina && attach) {
       const estado = target.principalSubject?.volumeState;
       if (estado === "low" || estado === "with_volume") {
         p.subjectKeywordId = pagina;
@@ -2024,7 +2083,9 @@ function enforcePageSubject(targets: readonly ImprovementTarget[], proposals: Im
     for (const id of [...p.memberIds]) {
       if (id === p.principalId || id === pagina) continue;
       const k = byId.get(id);
-      const detalhe = k ? principalSubjectConflictDetail(target, k) : null;
+      const foraDoSlug = k ? publishedSlugConflict(target, k.keyword) : null;
+      const detalhe = k && pagina ? principalSubjectConflictDetail(target, k)
+        : foraDoSlug ? { reason: foraDoSlug, kind: "other" as const } : null;
       if (!k || !detalhe) continue;
       const conflito = detalhe.reason;
       if (detalhe.kind === "intent_dna") {
@@ -2222,7 +2283,7 @@ export function volumelessPrincipalSwap(
   };
   const melhor = target.memberIds
     .map(id => byId.get(id))
-    .filter((k): k is ImprovementKeyword => Boolean(k) && k!.id !== target.primaryId && !k!.published && k!.volumeValidated && (k!.volume ?? 0) > 0 && (!k!.ownerId || k!.ownerId === target.id) && !contradicts(k!.id) && (!porVolume || principalFitsSubject(target, k!) === null))
+    .filter((k): k is ImprovementKeyword => Boolean(k) && k!.id !== target.primaryId && !k!.published && k!.volumeValidated && (k!.volume ?? 0) > 0 && (!k!.ownerId || k!.ownerId === target.id) && !contradicts(k!.id) && !publishedPrincipalScopeConflict(target, k!) && (!porVolume || principalFitsSubject(target, k!) === null))
     .map(k => ({ k, a: afinidade(k) }))
     .filter(item => item.a.comuns > 0)
     .sort((x, y) => y.a.nucleo - x.a.nucleo || y.a.comuns - x.a.comuns || y.a.precisao - x.a.precisao || (y.k.volume ?? 0) - (x.k.volume ?? 0))[0]?.k;
@@ -2234,11 +2295,11 @@ export function volumelessPrincipalSwap(
     targetId: target.id, kind: target.kind, theme: target.theme,
     currentPrimaryId: target.primaryId, principalId: melhor.id, memberIds: viraAssunto ? target.memberIds.filter(id => id !== pagina) : [...target.memberIds],
     addIds: [], removeIds: viraAssunto ? [pagina!] : [], transfers: [], angle: angleOf(melhor), exclusions: [],
-    ...(pagina && pagina !== melhor.id ? { subjectKeywordId: pagina } : {}),
+    ...(pagina && pagina !== melhor.id && target.principalSubject?.declared !== false ? { subjectKeywordId: pagina } : {}),
     reasons: [
       "URL, slug, canonical e Silo publicados preservados.",
       porVolume ? principalSubjectSwapReason(target, atual, melhor, ranking) : `Principal sem volume com Posto Livre: “${melhor.keyword}” (${melhor.volume}), já no artigo e a mais próxima do slug em sentido e palavras, assume; “${atual?.keyword ?? target.theme}” fica como secundária. Nada entra nem sai.`,
-      ...(viraAssunto ? [PAGE_BECOMES_SUBJECT_REASON] : []),
+      ...(viraAssunto && target.principalSubject?.declared !== false ? [PAGE_BECOMES_SUBJECT_REASON] : []),
       "A SERP desta composição é relida pelo cache ao gravar e decide.",
       ...(ranking === true ? ["A página ranqueia hoje para a frase antiga: risco de ranking é aviso, não revoga o Posto Livre."] : []),
     ],

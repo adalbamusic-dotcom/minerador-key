@@ -25,7 +25,7 @@ import {
 } from "../lib/arquiteto/editorial-keyword-dna-export.ts";
 import { ARQUITETO_CSV_BOM, parseCsv } from "../lib/arquiteto/csv.ts";
 import { ArquitetoExportError, type ArquitetoExportInput, type ArquitetoExportSilo } from "../lib/arquiteto/export-source.ts";
-import { createInternalLinkGraph } from "../lib/arquiteto/internal-link-graph.ts";
+import { createInternalLinkGraph, createInternalLinkGraphWorkingCopy } from "../lib/arquiteto/internal-link-graph.ts";
 import type {
   ArticleDNA,
   InternalLinkGraphEdge,
@@ -283,6 +283,21 @@ test("uma linha por ArticleDNA, com os links agregados e não uma linha por ares
   assert.equal(artifact.contract, "EDITORIAL_EXPORT_V1");
   assert.match(artifact.fileName, /^arquiteto-editorial-care-glow-/);
   assert.match(artifact.summary, /^Exportado: 2 artigo\(s\) · 1 Silo\(s\) · 2 com links internos\.$/);
+});
+
+test("a exportação editorial usa os links aprovados enquanto outra versão está em edição", async () => {
+  const input = await baseInput();
+  const silo = input.silos[0];
+  const approved = silo.approvedGraph!;
+  const draft = await createInternalLinkGraphWorkingCopy({
+    ...approved, createdBy: ACTOR, now: AT,
+    edges: approved.edges.map(link => ({ ...link, reason: "Mudança ainda em revisão" })),
+  });
+  const comparing = { ...input, silos: [{ ...silo, graph: { source: "working_copy" as const, graph: draft } }] };
+  const editorial = buildArquitetoEditorialExport(comparing);
+  assert.match(editorial.content, /A raiz apresenta o Pilar/);
+  assert.doesNotMatch(editorial.content, /Mudança ainda em revisão/);
+  assert.match(buildArquitetoBackup(comparing).content, /Mudança ainda em revisão/);
 });
 
 test("a linha traz o plano do artigo: Silo, papel, composição, KeywordDNA, SERP e links", async () => {

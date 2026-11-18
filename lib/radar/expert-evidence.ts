@@ -26,12 +26,12 @@ export type RadarExpertBriefEvidenceSource = {
 };
 
 export type RadarExpertEvidenceReview = {
-  decision: "pending" | "accepted" | "support" | "quote" | "rejected";
+  decision: "pending" | "accepted" | "support" | "quote" | "main_subject" | "rejected";
 };
 
 export function parseRadarExpertEvidenceReviews(value: unknown): Record<string, RadarExpertEvidenceReview> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const decisions = new Set<RadarExpertEvidenceReview["decision"]>(["pending", "accepted", "support", "quote", "rejected"]);
+  const decisions = new Set<RadarExpertEvidenceReview["decision"]>(["pending", "accepted", "support", "quote", "main_subject", "rejected"]);
   return Object.fromEntries(Object.entries(value).flatMap(([id, raw]) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof (raw as Record<string, unknown>).decision !== "string") return [];
     const decision = (raw as Record<string, unknown>).decision as RadarExpertEvidenceReview["decision"];
@@ -115,7 +115,7 @@ export function projectRadarExpertEvidence(input: {
   const decision = input.review?.decision || "pending";
   if (decision === "pending") return { evidence: null, reason: "pending_review" };
 
-  const organizedText = organizationText(input.contribution.organizationPayload);
+  const organizedText = decision === "main_subject" ? null : organizationText(input.contribution.organizationPayload);
   const transcriptText = nonEmptyText(input.contribution.transcriptText);
   const originalText = nonEmptyText(input.contribution.originalText);
   const approvedContent = organizedText || transcriptText || originalText;

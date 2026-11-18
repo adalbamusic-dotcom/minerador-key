@@ -32,6 +32,38 @@ import type { RadarWritingExportRow } from "./portable-writing-export.ts";
 
 /** A versão do material (entra na resposta do MCP e no painel). */
 export const RADAR_WRITING_MATERIAL_VERSION = "2026-10-14";
+export const RADAR_DOWNLOAD_BRIEF_HEADING = "Materiais para download";
+
+const DOWNLOAD_FORMATS: ReadonlyArray<{ label: string; matches: RegExp; instruction: string }> = [
+  { label: "PDF", matches: /\bpdf\b/, instruction: "Monte um PDF com o conteúdo prometido. Se for um modelo, inclua um exemplo preenchido e uma versão em branco." },
+  { label: "Planilha", matches: /\b(?:planilhas?|excel|xlsx?|google sheets|csv)\b/, instruction: "Prepare uma planilha editável com campos nomeados, instruções de preenchimento e um exemplo. Confira as fórmulas que a planilha usar." },
+  { label: "Imagens do Drive", matches: /\b(?:imagens?|fotos?|ilustrac(?:ao|oes))\b.*\bdrive\b|\bdrive\b.*\b(?:imagens?|fotos?|ilustrac(?:ao|oes))\b/, instruction: "Organize as imagens numa pasta do Drive com nomes claros, autorização de uso e acesso para o público do artigo." },
+  { label: "Documento editável", matches: /\b(?:docx?|google docs|word|modelos? editave(?:l|is))\b/, instruction: "Prepare um documento que o leitor consiga copiar ou editar. Identifique os campos que ele precisa completar." },
+  { label: "Apresentação", matches: /\b(?:pptx?|powerpoint|google slides|slides? editave(?:l|is))\b/, instruction: "Prepare a apresentação no formato prometido, com os slides necessários e um exemplo de uso." },
+];
+
+/** Projeta tarefas a partir das buscas do artigo. Resultados da SERP não são ofertas da marca. */
+export function radarDownloadBrief(keywords: readonly string[]): string[] {
+  const formats = new Map<string, { keyword: string; instruction: string }>();
+  for (const keyword of keywords) {
+    const normalized = keyword.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (/\bsem (?:precisar de )?(?:baixar|download|pdf|planilha)\b|^(?:o que e|diferenca entre|como (?:abrir|converter|compactar|desbloquear|mesclar|editar))\b/.test(normalized)) continue;
+    const specific = DOWNLOAD_FORMATS.filter(format => format.matches.test(normalized));
+    for (const { label, instruction } of specific) {
+      if (!formats.has(label)) formats.set(label, { keyword, instruction });
+    }
+    if (!specific.length && /\b(?:baixar|baixe|download|baixave(?:l|is)|imprimive(?:l|is)|para imprimir|(?:arquivo|pasta|link) (?:no|do) (?:google )?drive|zip)\b/.test(normalized) && !formats.has("Arquivo baixável")) {
+      formats.set("Arquivo baixável", { keyword, instruction: "Prepare o material indicado na busca em um formato utilizável. Identifique o conteúdo do arquivo e como usá-lo." });
+    }
+  }
+  if (!formats.size) return [];
+  return [
+    ...[...formats].map(([label, { keyword, instruction }]) => `- ${label} · busca “${keyword}”. ${instruction}`),
+    "- Produção e disponibilização pelo redator: monte o material a partir dos exemplos ou instruções do artigo e hospede-o em um endereço autorizado pela marca.",
+    "- Antes de publicar: abra o endereço sem depender da sua conta e confira o acesso do leitor. Na seção em que o material é útil, explique o que ele inclui e use uma âncora que identifique o arquivo e seu formato.",
+    "- Pendência editorial: até o material e o link estarem verificados, entregue os exemplos no corpo e mantenha a oferta de download fora do texto, do título e da descrição. Registre a pendência no entregável.",
+  ];
+}
 
 /** Um item do checklist: um link interno (L no corpo, T na trilha) ou uma fonte externa de autoridade (X). */
 export type RadarWritingMaterialItem = {
@@ -76,6 +108,8 @@ export type RadarWritingMaterial = {
   authorityReferences: string[];
   /** As afirmações de saúde sem fonte verificada (YMYL): não afirmar como fato. */
   ymylWithoutSource: string[];
+  /** Instruções de produção e disponibilização, quando a busca pede um recurso. */
+  downloadDeliverables?: string[];
 };
 
 const linhasDe = (celula: string | null | undefined): string[] =>
@@ -149,6 +183,7 @@ export function radarWritingMaterialOf(linha: RadarWritingExportRow | null | und
   const referencias = linhasX.filter(item => / — /.test(item) && !/ · sustenta "/.test(item)).map(item => item.replace(/^- /, ""));
   const linkaveis = linhasX.filter(item => / · sustenta "/.test(item));
   const ymyl = comecaCom(fontes, "Afirmações de saúde sem fonte verificada");
+  const downloadDeliverables = blocoDesde(estrutura, new RegExp(`^${RADAR_DOWNLOAD_BRIEF_HEADING}$`)).slice(1);
 
   return {
     version: RADAR_WRITING_MATERIAL_VERSION,
@@ -170,6 +205,7 @@ export function radarWritingMaterialOf(linha: RadarWritingExportRow | null | und
     authority: linkaveis.map(itemDeFonte),
     authorityReferences: referencias,
     ymylWithoutSource: ymyl,
+    ...(downloadDeliverables.length ? { downloadDeliverables } : {}),
   };
 }
 

@@ -1,3 +1,13 @@
+## 49. Assunto e links vigentes dos publicados — 2026-11-18
+
+**Comparação de SERP em Melhorar publicados.** Para slugs com público explícito ou com uma negação que delimita o problema, a prévia conta os títulos orgânicos distintos em que aparece esse recorte. A leitura usa quatro lentes e uma amostra mínima de cinco títulos no cache. A proporção ajuda a ordenar candidatas já elegíveis, antes de desempatar pelo volume. A prévia mostra o sinal da atual e da candidata quando houver amostra. A contagem de títulos é evidência textual; o parecer de intenção e a confirmação continuam obrigatórios.
+
+O slug do endereço publicado, conferido no cadastro da página, delimita o assunto de **Melhorar publicados**. A principal proposta precisa manter o público, a entidade, a restrição ou a comparação expressa no slug. Sobreposição na SERP ajuda a avaliar a candidata; ela não autoriza trocar o nicho. Uma busca ampla compatível pode reforçar o contexto. O reforço que contradiz a página sai da composição proposta para revisão na mesma prévia. Permanecem as condições de volume, política de troca, parecer e confirmação humana dos §§47–48.
+
+Na confirmação, o ArticleDNA sucessor grava a cobertura das keywords aprovadas nesta composição e o assunto ancorado na página. A versão anterior não alimenta a lista nova de cobertura. O endereço e a identidade publicados permanecem protegidos. Esta regra substitui para publicados a promoção da cabeça genérica que perde um modificador do slug. No publicado legado com ArticleDNA, posto Livre e volume zero confirmado na página, o slug serve como recorte durante a correção; o vínculo formal de Assunto continua dependendo do pacote declarado do Minerador.
+
+Ao entregar ao Radar, Links usa uma só versão aprovada do grafo do Silo: a de maior número, conferida contra o SiloDNA, a SiloPage e a versão do artigo. Falta de compatibilidade pede nova confirmação da composição de Links. A exportação editorial lê a versão aprovada; a cópia em edição pertence à etapa de revisão.
+
 ## Sequência aprovada e implementação — 2026-11-15
 
 **Regra aprovada:** a linha única segue Silos → Artigos → Links → Radar, conforme [adendo de 02/11](../compartilhado/adendo-silo-antes-dos-artigos-2026-11-02.md). As afirmações abaixo de que o par do Silo deve ser fechado somente após formar artigos ficam **SUBSTITUÍDAS como contrato de destino**; permanecem como registro do comportamento atual enquanto a adaptação dos mesmos acionadores e gravadores não estiver concluída. Não se deve anunciar a sequência nova como implementada antes de sua integração e validação.

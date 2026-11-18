@@ -1,5 +1,20 @@
 # Backlog — Radar
 
+- [x] Entregar orientações de produção e acesso para materiais baixáveis no CSV “Para escrever” e nos fundamentos do Redator.
+
+- [ ] Conferir a exportação real de “Plano de marketing estética: exemplos e templates” e validar a entrega do arquivo quando o redator disponibilizá-lo.
+
+- [x] Compactar o painel do Especialista nos estados com e sem contribuição, mantendo os controles da revisão.
+
+- [x] Incorporar parecer selecionado ao assunto principal na revisão existente, no artigo-modelo e no CSV “Para escrever”.
+
+- [x] Reunir os fundamentos e endereços no painel da linha expandida e compactar o resumo da investigação.
+
+- [x] Exibir os endereços recebidos e o slug no painel de definição do artigo, com a URL publicada do Minerador apenas quando há vínculo no ArticleDNA.
+
+- [x] Distinguir redirecionamentos orgânicos do Google com destinos diferentes e recuperar a amostra do checklist da AdalbaPro pelo botão existente.
+- [x] Confirmar após recarga o fechamento local de “plano de marketing estética: exemplos e templates” e “marketing para clínica de estética”.
+
 - [x] Confirmar na interface local o término da análise de concorrência da AdalbaPro: artigo finalizado, 8 de 11 páginas analisadas.
 - [ ] Verificar no deployment atualizado a pesquisa e o estado ocupado durante consultas auxiliares. A correção é local até o próximo deploy.
 

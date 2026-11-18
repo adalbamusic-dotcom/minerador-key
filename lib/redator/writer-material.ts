@@ -161,6 +161,7 @@ export function writerMaterialForMcp(leitura: WriterMaterialRead, documento: unk
     authority: checklist.authority,
     authorityReferences: material.authorityReferences,
     ymylWithoutSource: material.ymylWithoutSource,
+    ...(material.downloadDeliverables?.length ? { downloadDeliverables: material.downloadDeliverables } : {}),
     checklist: checklist.counts,
     siloLinksUpdate: checklist.siloLinksUpdate,
   };
@@ -177,6 +178,13 @@ export function writerMaterialForMcp(leitura: WriterMaterialRead, documento: unk
       atual = { ...atual, [campo]: lista.slice(0, manter) };
     }
     if (medir() <= teto) break;
+  }
+  if (medir() > teto && material.downloadDeliverables?.length) {
+    delete atual.downloadDeliverables;
+    trimmed.push({
+      field: "downloadDeliverables", kept: 0, total: material.downloadDeliverables.length,
+      readAt: "get_article_for_writing (bloco Materiais para download do CSV 'Para escrever')",
+    });
   }
   return trimmed.length ? { ...atual, trimmed } : atual;
 }

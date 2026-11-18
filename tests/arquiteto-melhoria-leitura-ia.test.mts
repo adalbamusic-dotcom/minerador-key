@@ -40,11 +40,12 @@ test("casos BONS: a IA completa o publicado sem par da SERP, com motivo visível
   assert.match(a.reasons.join(" "), /parecer da SERP da composição final continua obrigatório/);
   assert.match(a.reasons.join(" "), /A IA sugeriu “como atrair clientes” como principal, mas a principal atual é a identidade do assunto \(está no título ou no slug\) e fica: entra como secundária/);
   assert.equal(b.status, "ready"); assert.equal(b.principalId, "estetica"); assert.deepEqual(b.memberIds, ["estetica", "captar"]);
-  // Fora da identidade (a principal da página não é o assunto do slug): a mais ampla com o núcleo do slug assume, com o aviso de SEO.
+  // Mesmo com a antiga fora da identidade, a principal com volume deve levar o recorte do slug.
   const estranha = pub("consultorio", "consultório odontológico sem agenda", { slug: "como-atrair-clientes-para-consultorio" });
   const [fora] = planArticleImprovements({ targets: [estranha], keywords: [own(estranha), ...boas], evidence: noEvidence, editorialPicks: checked.picks.filter(p => p.targetId === "consultorio"), ranking: { consultorio: false } });
-  assert.equal(fora.principalId, "atrair", JSON.stringify(fora.reasons));
-  assert.match(fora.reasons.join(" "), /Principal mais ampla, com volume: "como atrair clientes" leva o núcleo do assunto da página; o nicho do slug continua no texto/);
+  assert.equal(fora.principalId, "consultorio", JSON.stringify(fora.reasons));
+  assert.ok(fora.memberIds.includes("atrair"));
+  assert.match(fora.reasons.join(" "), /perde o público\/nicho/);
   assert.equal(IMPROVEMENT_AI_LABEL, "Leitura da IA — confira");
 });
 
@@ -107,7 +108,9 @@ test("principal nova só com Posto Livre, atual sem volume e página que não ra
   // 2026-10-17 · a principal de identidade (o slug foi feito dela) fica; fora da identidade, a IA pode propor a troca.
   assert.match(editorialAiPrincipalBlock(consultorio, semVolume, candidate, false)!, /identidade do assunto/);
   const estranha = pub("consultorio", "consultório odontológico sem agenda", { slug: "como-atrair-clientes-para-consultorio" });
-  assert.equal(editorialAiPrincipalBlock(estranha, own(estranha), candidate, false), null);
+  assert.match(editorialAiPrincipalBlock(estranha, own(estranha), candidate, false)!, /perde o público\/nicho/);
+  const doNicho = kw("nicho", "como atrair clientes para consultório", 20);
+  assert.equal(editorialAiPrincipalBlock(estranha, own(estranha), doNicho, false), null);
   assert.match(editorialAiPrincipalBlock({ ...consultorio, post: "locked" }, semVolume, candidate, false)!, /Travado/);
   assert.match(editorialAiPrincipalBlock({ ...consultorio, post: "unknown" }, semVolume, candidate, false)!, /não foi declarado/);
   assert.match(editorialAiPrincipalBlock(consultorio, comVolume, candidate, false)!, /já tem volume/);

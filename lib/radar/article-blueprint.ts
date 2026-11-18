@@ -25,6 +25,7 @@ import {
   radarWritingCompareKey,
   radarWritingCompetitorTopicsOf,
   RADAR_WRITING_FUNCTION_WORDS,
+  RADAR_MAIN_SUBJECT_SPECIALIST_RULE,
   RADAR_WRITING_NO_APPROVED_LINK,
   radarWritingDecodeEntities,
   radarWritingProjections,
@@ -1678,7 +1679,11 @@ export function buildRadarArticleBlueprintBrief(input: {
   /* 2026-10-14c · F-B · a afirmação que uma fonte de autoridade verificada sustenta não vai como "sem fonte". */
   const sustentadaPorAutoridade = radarWritingAuthoritySupported(p);
 
-  const especialista = radarWritingSpecialistContributions(p).map(item => ({ id: item.rotulo, kind: item.tipo, text: item.resposta }));
+  const especialista = radarWritingSpecialistContributions(p).map(item => ({
+    id: item.rotulo,
+    kind: item.assuntoPrincipal ? "ASSUNTO_PRINCIPAL" : item.tipo,
+    text: item.resposta,
+  }));
   /*
    * 2026-10-02 · OS VÍDEOS COM O MODO DE USO DO DONO (Adendo B, D6).
    *
@@ -2039,6 +2044,9 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     ...linhas("Afirmações que o mercado repete SEM fonte (não afirmar como fato)", brief.unsupportedClaims),
     ...linhas("Afirmações de saúde SEM fonte verificada (YMYL: não afirmar como fato; delimitar ou omitir)", brief.ymylWithoutSource || []),
     ...linhas("Especialista (id E; voz de quem pratica)", brief.specialist.map(item => `${item.id}${item.kind ? ` (${item.kind})` : ""}: ${item.text}`)),
+    ...(brief.specialist.some(item => item.kind === "ASSUNTO_PRINCIPAL")
+      ? [`Para cada E marcado ASSUNTO_PRINCIPAL, use o id em sections[].specialist na seção que o desenvolve e indique em answerFirst ou explain como a contribuição se liga à evidência ou à pergunta da SERP. Agrupe contribuições próximas. ${RADAR_MAIN_SUBJECT_SPECIALIST_RULE}`, ""]
+      : []),
     ...linhas("Vídeos da marca (id V)", brief.videos.map(item => `${item.id}: ${item.text}`)),
     /* 2026-10-09 · 5 · a exclusão que vem da Skill de voz diz de onde vem (e vale também como diferencial, pergunta e H3). */
     /* 2026-10-09b · a exclusão do ArticleDNA (reajuste) também diz de onde vem e, quando a nota diz, o artigo dono. */

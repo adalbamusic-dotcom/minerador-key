@@ -173,7 +173,8 @@ test("'Detalhes técnicos' é o PRIMEIRO bloco da aba Artigos e tem, no topo e u
     anterior = posicao;
   }
   // A barra de progressão dos processos: o "Processo ativo" de sempre, com a barra da plataforma, só enquanto roda.
-  assert.match(tela, /const articleProcessActivity = articleMode && \(activeLogicalTask \|\| serpBusy \|\| activeKeywordReviewTask\) \?/);
+  assert.match(tela, /const articleProcessActivity = articleMode && \(activeLogicalTask \|\| serpBusy \|\| serpBlockProgress\?\.process === "formation_serp" \|\| activeKeywordReviewTask \|\| formationBusy\) \?/);
+  assert.match(tela, /onProgress: snapshot => setSerpBlockProgress\(\{ process: "formation_serp", text: formatSerpBlockProgress\(snapshot\) \}\)/, "a coleta do lote apresenta o progresso mesmo com um só bloco");
   assert.match(tela, /data-testid="architect-articles-process-activity"/);
   assert.match(tela, /testId="architect-articles-process-progress"/);
   // Fora de Detalhes técnicos, na aba Artigos, só a tabela e as Sobras: nenhuma barra de processo.

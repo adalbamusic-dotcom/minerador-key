@@ -417,6 +417,7 @@ export type RadarPortableSpecialistItem = {
   limitations: string[];
   /** Tipo do ponto: REVIEW_POINT…, ou FECHAMENTO, CTA e DIRETRIZ do parecer direto. Opcional (aditivo). */
   kind?: string | null;
+  mainSubject?: true;
 };
 
 export type RadarPortableSpecialistContext = {
@@ -451,11 +452,13 @@ export function radarPortableSpecialistContext(layer: RadarSpecialistEvidenceLay
 
   return {
     state: "RECEIVED",
-    note: "As contribuições abaixo foram revisadas e aprovadas por uma pessoa. Cada uma responde a um ponto preparado pela investigação.",
+    note: layer.items.some(item => item.humanDecision === "MAIN_SUBJECT")
+      ? "As contribuições abaixo foram aprovadas. As marcadas para o assunto principal entram no corpo do artigo em conjunto com a SERP."
+      : "As contribuições abaixo foram revisadas e aprovadas por uma pessoa. Cada uma responde a um ponto preparado pela investigação.",
     items: layer.items.map(item => ({
       requirementQuestion: item.requirementQuestion,
       questionsSent: [...item.sentQuestions],
-      contribution: item.extractedSummary,
+      contribution: item.humanDecision === "MAIN_SUBJECT" ? item.originalText : item.extractedSummary,
       fullAnswer: item.originalText,
       classification: RADAR_SPECIALIST_CLASSIFICATION_LABELS[item.classification] || item.classification,
       status: RADAR_SPECIALIST_DECISION_LABELS[item.humanDecision] || item.humanDecision,
@@ -463,6 +466,7 @@ export function radarPortableSpecialistContext(layer: RadarSpecialistEvidenceLay
       appliesTo: item.editorialUse,
       quote: item.quote,
       kind: item.requirementKind || null,
+      ...(item.humanDecision === "MAIN_SUBJECT" ? { mainSubject: true as const } : {}),
       /*
        * "APOIO" NÃO SUSTENTA AFIRMAÇÃO FACTUAL, e isso precisa viajar.
        *

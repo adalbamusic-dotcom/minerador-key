@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { ChevronDown, FileCheck2, Search, UserRound, Video } from "lucide-react";
 import { RADAR_R3_AREAS, type RadarR3Area, type RadarR3Model } from "@/lib/radar/r3-workbench";
-import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
 import type { RadarR6ExpertEvidenceInput, RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { radarR4SerpStatusLabel, type RadarR4AmazonState } from "@/lib/radar/r4-queue";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
@@ -26,7 +25,7 @@ import type { RadarPhase1Action } from "@/lib/radar/serp-phase1";
 import type { RadarExtractionPage } from "@/lib/radar/analysis-contracts";
 import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-model";
 import {
-  buildRadarArticleDnaSummary, buildRadarAuthoritySummary, buildRadarCompetitiveSummary,
+  buildRadarAuthoritySummary, buildRadarCompetitiveSummary,
   buildRadarDiscoverySummary, buildRadarInternalLinkSummary, buildRadarReportSummary,
   buildRadarResearchCardSummary, type RadarReportInputs,
 } from "@/lib/radar/operational-view";
@@ -35,7 +34,6 @@ import { radarQueryDispositionLabel } from "@/lib/radar/research-query-plan";
 import type { RadarDeepResearchView } from "@/lib/radar/deep-research-view";
 import { RADAR_DEFAULT_SEARCH_MODE, RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE, radarSearchModeAvailability, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
 import { RadarR3AmazonPanel } from "./radar-r3-amazon-panel";
-import { RadarR3ContentDossier } from "./radar-r3-content-dossier";
 import { RadarR3VideosPanel, type RadarVideoSourcesView } from "./radar-r3-videos-panel";
 import { summarizeRadarVideoLibrary, type RadarLibrarySource, type RadarVideoUsage } from "@/lib/radar/video-library";
 import { RadarBlueprintSummaryCard } from "./radar-r3-blueprint";
@@ -1362,45 +1360,6 @@ function Phase1Slot({ view, busy, searchMode = RADAR_DEFAULT_SEARCH_MODE, resear
 }
 
 /**
- * O ARTIGO INVESTIGADO — faixa de contexto, não área de trabalho.
- *
- * "Conteúdo" ocupava um quarto da primeira camada para exibir um fundamento
- * que ninguém edita aqui. Fundamento não é etapa: ele é o que está sendo
- * investigado, e precisa estar visível o tempo todo — em uma linha, não em um
- * card. Os fundamentos completos continuam inteiros, a um clique.
- *
- * READ_ONLY por construção: esta faixa não recebe nenhum handler.
- */
-function ArticleContextBand({ model }: { model: RadarR3Model }) {
-  const resumo = model.researchContext ? buildRadarArticleDnaSummary(model.researchContext) : null;
-  const partes = resumo
-    ? [
-      resumo.principal,
-      resumo.silo,
-      resumo.role,
-      resumo.intent,
-      resumo.funnel,
-      `${resumo.keywordCount} keyword(s)`,
-    ].filter((item): item is string => Boolean(item))
-    : [model.keyword, model.silo, model.hierarchy].filter((item): item is string => Boolean(item));
-
-  return <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" data-testid="radar-article-context-band">
-    <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">ArticleDNA</span>
-    <span className="text-foreground">{model.articleDnaVersion}</span>
-    <span className="text-text-muted">·</span>
-    <span className="text-keyword">{resumo?.principal || model.keyword || "principal não resolvida"}</span>
-    {partes.slice(1).map(parte => <span key={parte} className="text-text-muted">· {parte}</span>)}
-    {resumo && !resumo.complete && <span className="text-warning">· contexto parcial</span>}
-    {model.researchContext && <details className="w-full" data-testid="radar-article-foundations-details">
-      <summary className="cursor-pointer text-sm text-context-accent">Ver fundamentos do Article</summary>
-      <div className="mt-2.5">
-        <RadarR3ContentDossier model={model.content} editorialContext={model.editorialContext} researchContext={model.researchContext} />
-      </div>
-    </details>}
-  </div>;
-}
-
-/**
  * O RELATÓRIO RESPONDE PERGUNTAS.
  *
  * "Prévia gerada · 34 necessidades" é verdade e não informa. Cada linha aqui é
@@ -1410,8 +1369,8 @@ function ArticleContextBand({ model }: { model: RadarR3Model }) {
 /*
  * O RELATÓRIO É PAINEL, NÃO REVISÃO (pedido do dono, 2026-10-02).
  *
- * Mostra o artigo (intenção declarada × a da SERP, funil, principal, Silo) e o
- * estado SEO em relação às diretrizes do Google e das respostas de IA. Não pede
+ * Mostra a intenção observada e o estado SEO em relação às diretrizes
+ * do Google e das respostas de IA. Não pede
  * revisão e não alerta: o que falta aparece como nota baixa no pilar.
  */
 /*
@@ -1438,15 +1397,10 @@ function ReportSummaryPanel({ model, brandId = null, articleId = null, articleDn
   const resumo = buildRadarReportSummary({ observed: model.deepResearch.observed, view: model.deepResearch, ...entradasDoRelatorio(model, researchProjection), articleBlueprint: planta?.approval === "APPROVED" ? "APPROVED" : null });
   const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence, articleBlueprint: planta });
   const intencao = model.deepResearch.observed.intent;
-  const dna = model.article?.payload || null;
   const dados: Array<[string, string]> = [
-    ["Keyword principal", model.keyword || "Não resolvida"],
-    ["Intenção declarada", intencao.declared || "Não declarada"],
     ["Intenção na SERP", intencao.observedInSerp || "Não observada"],
     ["Declarada × SERP", { ALIGNED: "Concordam", COHERENT_COMMERCIAL: "Concordam (comercial)", DIVERGENT: "Divergem", NOT_OBSERVED: "SERP sem leitura" }[intencao.alignment]],
     ["Formato dominante", intencao.observedInPages || "Não observado"],
-    ["Funil", dna?.journeyStage || "Não declarado"],
-    ["Silo e papel", [model.silo, model.hierarchy].filter(Boolean).join(" · ") || "Sem Silo"],
   ];
   const corDaNota = (nota: number | null) => nota === null ? "bg-surface-subtle" : nota >= 80 ? "bg-success" : nota >= 50 ? "bg-pending" : "bg-warning";
   return <section className="space-y-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-report-summary">
@@ -1586,10 +1540,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
     <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-context-accent">Radar</p>
       <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">{model.title}</h1>
-      {/* 2026-10-13 · pedido do dono: o Assunto do ArticleDNA (pelo contexto de pesquisa), legível, no cabeçalho. */}
-      <ArticleSubjectLine phrase={model.researchContext?.article.subject?.phrase} showEmpty={Boolean(model.researchContext)} className="basis-full"/>
     </header>
-    <ArticleContextBand model={model} />
     <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{RADAR_R3_AREAS.map(area => <AreaCard key={area} area={area} copy={area === "videos" ? copyDeVideos : areaCopy(area, model, searchMode, researchProjection)} expanded={expandedArea === area} onToggle={() => setExpandedArea(current => current === area ? null : area)} />)}</div>
     {/*
       * QUATRO ÁREAS, QUATRO DONOS — e nada operacional depois do switch.
@@ -1597,7 +1548,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
       * A investigação era montada fora daqui e reaparecia nas quatro áreas: quem
       * abria o Especialista via o seletor Google/YouTube/Amazon e o modelo
       * competitivo inteiro embaixo. Cada painel agora vive dentro da própria
-      * área, e o que fica global é só o fundamento do artigo.
+      * área. Os fundamentos ficam no painel expansível da planilha.
       */}
     <div id={expandedArea ? `radar-r3-panel-${expandedArea}` : undefined} className="mt-3">
       {/* A CAMADA DO ARTIGO REMONTA POR ARTIGO. A key saiu do Workbench inteiro — ela apagava a biblioteca da marca a cada troca — e ficou onde sempre pertenceu: nos painéis cujo rascunho é de um artigo só. */}

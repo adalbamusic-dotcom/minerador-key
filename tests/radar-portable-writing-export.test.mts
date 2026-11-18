@@ -3,6 +3,10 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { RADAR_WRITER_MAY_NOT } from "../lib/redator/writer-handoff.ts";
+import { buildRadarArticleBlueprintBrief, radarArticleBlueprintPrompt } from "../lib/radar/article-blueprint.ts";
+import { radarPortableSpecialistContext } from "../lib/radar/portable-annex-context.ts";
+import { buildRadarSpecialistEvidenceLayer } from "../lib/radar/specialist-evidence.ts";
+import { radarContextWithSpecialistReview, radarSpecialistExtraction, radarSpecialistReviewsOf } from "../lib/radar/specialist-contribution-review.ts";
 import { buildRadarPortableExportRow, radarPortableExportCsv } from "../lib/radar/portable-export.ts";
 import { radarPortableExportRows, radarPortableExportSiloFiles } from "../lib/radar/portable-export-batch.ts";
 import { planRadarSiloExport } from "../lib/radar/portable-silo-export.ts";
@@ -59,6 +63,8 @@ import {
   planoDoSilo,
 } from "./radar-portable-writing-fixtures.mts";
 import { comPlanta, comPlantas, plantaDe } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
+import { radarDownloadBrief, radarWritingMaterialOf } from "../lib/radar/portable-writing-material.ts";
+import { writerMaterialForMcp } from "../lib/redator/writer-material.ts";
 
 /*
  * ===== O EXPORT "PARA ESCREVER" — 13 colunas, o que é preciso para escrever =====
@@ -348,6 +354,68 @@ test("D · a contradição do pacote é DITA, e não resolvida: YMYL 'baixa' com
   /* 2026-10-09 · a estrutura é a da planta (a marca "Precisa de fonte" da seção legada saiu com ela); a afirmação sem fonte continua dita nas fontes e no veredito. */
   assert.doesNotMatch(pilar.estrutura, /Precisa de fonte: a afirmação central/);
   assert.match(pilar.estrutura, /^ARTIGO-MODELO DA SERP/);
+});
+
+test("D · parecer avulso aprovado para o assunto chega à planta e à estrutura do CSV junto da SERP", () => {
+  const original = "Na consulta, mostro como adaptar a rotina sem trocar todos os produtos de uma vez.";
+  const contexto = radarContextWithSpecialistReview({
+    radarContext: {}, contributionId: "parecer-1",
+    review: { decision: "MAIN_SUBJECT", classification: null, relatedRequirementId: null, decidedAt: EXPORTADO_EM, decidedBy: "usuario" },
+  });
+  const decision = radarSpecialistReviewsOf(contexto)["parecer-1"].decision;
+  const entrada = entradaGoogleSaude();
+  const camada = buildRadarSpecialistEvidenceLayer({
+    binding: { brandId: MARCA, articleId: ARTIGO, articleDnaVersionId: VERSAO, articleDnaContentHash: HASH_DO_DNA },
+    preparedRequirements: 0,
+    sources: [{
+      extraction: radarSpecialistExtraction({
+        contributionId: "parecer-1", expertId: "especialista", briefId: "pauta",
+        requirementId: null, sourceType: "TEXT", originalText: original, transcriptText: null,
+        organizationPayload: { text: "Síntese da IA" }, receivedAt: EXPORTADO_EM, decision,
+      }),
+      requirementKind: "DIRETRIZ", requirementQuestion: "Parecer avulso", sentQuestions: [], expertDisplayName: null,
+    }],
+  });
+  assert.equal(camada.items.length, 1);
+  assert.equal(camada.items[0].quote, null);
+  const comParecer = { ...entrada, specialistContext: radarPortableSpecialistContext(camada) };
+  const brief = buildRadarArticleBlueprintBrief({ entrada: comParecer, silo: null, articleId: ARTIGO, publication: null });
+  assert.deepEqual(brief.specialist, [{ id: "E1", kind: "ASSUNTO_PRINCIPAL", text: original }]);
+  assert.match(radarArticleBlueprintPrompt(brief).user, /sections\[\]\.specialist.*evidência ou à pergunta da SERP/);
+  const linha = linhaComPlanta(comParecer, contextoAvulso()).row;
+  assert.match(linha.estrutura, /Contribuição para o assunto principal \(E1/);
+  assert.match(linha.estrutura, /ARTIGO-MODELO DA SERP/);
+  assert.ok(linha.fontes_e_especialista.includes(original), linha.fontes_e_especialista);
+  assert.doesNotMatch(linha.fontes_e_especialista, /Síntese da IA|chamada final \(CTA\)/);
+});
+
+test("D · PDF, planilha e imagens do Drive chegam ao CSV e ao Redator como tarefas", () => {
+  const entrada = entradaGoogle();
+  const { row, uncutRow } = linhaComPlanta({
+    ...entrada,
+    researchContext: undefined,
+    article: {
+      ...entrada.article,
+      principalKeyword: "plano de marketing clínica de estética pdf",
+      secondaryKeywords: ["planilha de planejamento para clínica", "imagens do Drive para o plano", "modelo de plano pdf"],
+    },
+  }, contextoAvulso());
+  assert.match(row.estrutura, /^Materiais para download\n/);
+  assert.equal(row.estrutura.match(/^- PDF · busca/gm)?.length, 1);
+  assert.match(row.estrutura, /Planilha · busca.*planilha de planejamento/);
+  assert.match(row.estrutura, /Imagens do Drive · busca.*imagens do Drive/);
+  assert.match(row.estrutura, /até o material e o link estarem verificados/);
+  assert.match(row.prompt, /somente após conferir o endereço autorizado pela marca/);
+  const material = radarWritingMaterialOf(uncutRow ?? row);
+  assert.ok(material?.downloadDeliverables);
+  assert.equal(material.downloadDeliverables.length, 6);
+  assert.match(material.downloadDeliverables[0], /exemplo preenchido e uma versão em branco/);
+  const leitura = { state: "ready" as const, articleId: ARTIGO, material };
+  assert.deepEqual(writerMaterialForMcp(leitura, null).downloadDeliverables, material.downloadDeliverables);
+  assert.equal(writerMaterialForMcp(leitura, null, 250).downloadDeliverables, undefined);
+  assert.equal(radarWritingMaterialOf(linhaComPlanta(entrada, contextoAvulso()).row)?.downloadDeliverables, undefined);
+  assert.deepEqual(radarDownloadBrief(["como converter PDF", "o que é um PDF", "modelos de plano sem precisar de download", "como usar o Google Drive"]), []);
+  assert.match(radarDownloadBrief(["checklist de implantação para baixar"])[0], /Arquivo baixável/);
 });
 
 test("D · a contribuição ACEITA do especialista não some: sai com o aviso de que responde outra coisa", () => {

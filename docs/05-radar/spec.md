@@ -1,5 +1,11 @@
 # Spec — Radar
 
+## Materiais para download no entregável — 2026-11-18
+
+O CSV “Para escrever” projeta, na coluna `estrutura`, um adendo quando o Assunto ou as keywords do artigo pedem explicitamente um recurso baixável, como PDF, planilha, documento editável, apresentação ou imagens do Drive. O prompt aponta para o adendo, e o material do Redator o lê da mesma linha. As palavras dos concorrentes e as buscas relacionadas da SERP não abrem tarefas. Formatos repetidos geram uma única tarefa.
+
+O adendo identifica o recurso, orienta o que produzir e deixa a disponibilização com o redator. A chamada de download fica condicionada a um arquivo pronto e ao acesso verificado no endereço autorizado pela marca. Enquanto o recurso estiver pendente, os exemplos podem entrar no artigo e a oferta de download fica fora do título, da descrição e do texto. A projeção não grava arquivo, não hospeda conteúdo e não altera o ArticleDNA.
+
 ## Assunto declarado — o tronco editorial no Radar — 2026-09-24
 
 Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), aprovada em 2026-09-24 (F3, F4.3, seções 6 e 7). Estado da implementação em `estado-atual.md`, mesma data.
@@ -291,6 +297,16 @@ ENTREGUE ao Planejador, e não apenas a partir do export.
 
 `bundle.video` e `bundle.specialist` são preenchidos pela autoridade canônica.
 
+Em “Resultado da revisão”, “Incluir no assunto principal” é uma decisão humana
+gravada na revisão da contribuição. A decisão permite usar o texto original
+no corpo do artigo junto com as perguntas e evidências da SERP, inclusive
+quando o parecer veio sem ponto de revisão. O artigo-modelo recebe o texto e a
+instrução de aplicação. O CSV “Para escrever” identifica o uso nas colunas
+`estrutura` e `fontes_e_especialista`. O parecer continua atribuído ao
+especialista. A decisão preserva o ArticleDNA, o congelamento e a distinção
+entre experiência, evidência factual e citação literal. Uma planta já gravada
+pode ser atualizada por “Organizar de novo (IA)”.
+
 A omissão de identificador privado acontece **na origem**, ao montar a camada,
 não no consumidor:
 
@@ -456,6 +472,11 @@ Contexto do Article → plano de consultas → SERP canônica → SERPs auxiliar
 universo de pesquisa → deduplicação → curadoria automática → persistência →
 readback. Nenhuma revisão manual intermediária é obrigatória.
 
+Na deduplicação orgânica, o destino em `google.com/goto?url=…` distingue
+resultados que usam o mesmo caminho de redirecionamento. O identificador da
+sessão do Google não distingue a página. O Radar usa essa mesma identidade
+na curadoria, na análise competitiva e no CSV da SERP.
+
 ### ANALYZE
 
 Extração dos concorrentes → persistência da amostra → readback → verificação de
@@ -620,9 +641,11 @@ nova e não remonta o Blueprint do zero. Ele decide o `ContentPlan` final.
 
 ### Contratos de UI
 
-Cards principais: `Pesquisa`, `Vídeos`, `Especialista`, `Relatório`. O
-ArticleDNA aparece como resumo global somente leitura. Detalhe técnico fica em
-progressive disclosure.
+Cards principais: `Pesquisa`, `Vídeos`, `Especialista`, `Relatório`. O topo
+identifica o artigo em foco e mantém os controles e resultados da pesquisa.
+Desde 2026-11-17, o painel da linha expandida reúne os fundamentos do
+ArticleDNA em somente leitura, substituindo o resumo global. Os detalhes
+técnicos ficam recolhidos nesse painel.
 
 A primeira camada não prioriza ids, hashes, ids de lote, readback ou depuração.
 Planilha e Workbench usam a mesma autoridade operacional — a mesma projeção, não
@@ -758,6 +781,12 @@ As abas da página própria usam os nomes `Estrutura observada`, `Semântica obs
 O Radar mostra a identidade recebida do Arquiteto com marca, artigo, keyword principal, slug, canonical, publicação, silo, função, ArticleDNA, SiloDNA, SiloPage, transferência e versão das evidências. IDs técnicos ficam recolhidos em proveniência.
 
 Conteúdo publicado exibe `Publicado e protegido`. Keyword principal, slug, canonical, marca e URL estrutural são somente leitura e preservados; o Radar pode recomendar atualização editorial sem alterar a identidade. Artigos novos também são somente leitura no Radar e apontam a revisão para o Arquiteto.
+
+Na linha expandida, “Ver fundamentos do Article” mostra o slug gravado e o
+canonical clicável quando recebido. Para publicados, a URL publicada só é
+clicável quando o ArticleDNA preserva a identidade de origem KeywordDNA do
+Minerador. A ausência de canonical fica explícita e o Radar nunca compõe um
+endereço a partir do slug.
 
 A comparação `Estratégia recebida x busca observada` normaliza `informativo`/`informacional`, não trata ausência em snippet como conflito definitivo e não compara função `Pilar`/`Suporte` com formato SERP. A aprovação não exige nota para keywords sem conflito; revisão no Arquiteto exige justificativa.
 

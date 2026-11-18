@@ -121,6 +121,8 @@ export type RadarSpecialistEvidenceSource = {
   expertDisplayName: string | null;
 };
 
+const MAIN_SUBJECT_REFERENCE_PREFIX = "assunto-principal:";
+
 /**
  * A CAMADA, PROJETADA DO QUE JÁ FOI DECIDIDO — sem recalcular decisão nenhuma.
  *
@@ -146,10 +148,12 @@ export function buildRadarSpecialistEvidenceLayer(input: {
     const { extraction } = fonte;
     if (extraction.humanDecision === "REJECTED") { rejected += 1; continue; }
     if (!radarSpecialistDecisionIsActive(extraction.humanDecision)) { notApproved += 1; continue; }
-    if (!extraction.requirementId || !extraction.originalText.trim()) { notApproved += 1; continue; }
+    const assuntoPrincipal = extraction.humanDecision === "MAIN_SUBJECT";
+    const requirementId = extraction.requirementId ?? (assuntoPrincipal ? `${MAIN_SUBJECT_REFERENCE_PREFIX}${extraction.contributionId}` : null);
+    if (!requirementId || !extraction.originalText.trim()) { notApproved += 1; continue; }
 
     items.push({
-      requirementId: extraction.requirementId,
+      requirementId,
       requirementQuestion: fonte.requirementQuestion,
       requirementKind: fonte.requirementKind,
       sentQuestions: [...fonte.sentQuestions],
@@ -191,7 +195,7 @@ export function radarSpecialistEvidenceCoverage(layer: RadarSpecialistEvidenceLa
   quotes: number;
 } {
   return {
-    requirementsCovered: new Set(layer.items.map(item => item.requirementId)).size,
+    requirementsCovered: new Set(layer.items.map(item => item.requirementId).filter(id => !id.startsWith(MAIN_SUBJECT_REFERENCE_PREFIX))).size,
     preparedRequirements: layer.preparedRequirements,
     quotes: layer.items.filter(item => Boolean(item.quote)).length,
   };

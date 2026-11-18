@@ -45,7 +45,7 @@ test("a keyword usa a cor oficial também fora do Minerador e do Arquiteto", () 
   const discovery = readFileSync("modules/minerador/discovery/discovery-table-placeholder.tsx", "utf8");
   const radarWorkbench = readFileSync("modules/radar/radar-workbench.tsx", "utf8");
   const radarPage = readFileSync("modules/radar/radar-page.tsx", "utf8");
-  const radarMirror = readFileSync("modules/radar/radar-r3-profile-mirror.tsx", "utf8");
+  const radarDossier = readFileSync("modules/radar/radar-r3-content-dossier.tsx", "utf8");
   const radarAnalysis = readFileSync("modules/radar/radar-analysis-page.tsx", "utf8");
   // Descobrir Keywords: a célula da keyword não pode voltar a text-foreground.
   assert.match(discovery, /const keywordCell = "[^"]*text-keyword/);
@@ -57,7 +57,7 @@ test("a keyword usa a cor oficial também fora do Minerador e do Arquiteto", () 
    */
   assert.match(radarPage, /<span className="mt-1 block text-sm">[^\n]*<span className="text-keyword">\{data\.r3\.keyword\}<\/span>/);
   assert.ok(radarPage.includes('<Field label="Keyword principal" tone="keyword"'));
-  assert.ok(radarMirror.includes('<Field label="Keyword principal" tone="keyword"'));
+  assert.ok(radarDossier.includes('<Fato label="Principal" value={resumo.principal} tone="keyword"'));
   assert.ok(radarAnalysis.includes('<Field label="Keyword principal" tone="keyword"'));
 });
 

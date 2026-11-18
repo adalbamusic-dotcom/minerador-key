@@ -1,3 +1,10 @@
+## Conferência dos publicados da AdalbaPro — 2026-11-18
+
+- Verificar na prévia de “Melhorar publicados” se a busca de Instagram traz resultados para pacientes, comparando os títulos orgânicos da principal e de candidatas elegíveis. O parecer da composição e o novo rastreamento no Google são verificações distintas.
+
+- Implementado localmente o recorte do slug e o uso da versão aprovada vigente do grafo.
+- Conferir no ambiente autenticado a nova prévia dos artigos publicados, os links confirmados e a adoção do resultado no Radar. O CSV de 18/11 também registrou um parecer de Instagram em Cosméticos; sua origem precisa ser verificada no Radar antes de usar o dossiê.
+
 ## Eventos e exclusão — 2026-11-16
 
 - [ ] Validar pelos acionadores, com eventos de status paginados, a ausência de formações rejeitadas na mesa; a correção passou com fixtures, não apaga registros e não substitui a purga física aprovada.
@@ -3292,3 +3299,6 @@ SDD: `sdd-reparo-pontual-do-artigo-2026-10-01.md` (1ª entrega feita).
 
 - [x] Permitir rolagem da prévia de custo e alcançar os botões existentes; conferido no popup real local, sem iniciar coleta paga.
 - [ ] Verificar a mesma prévia no deployment após a publicação da correção.
+## Visibilidade do processamento de artigos — 2026-11-16
+
+- [ ] Validar no navegador, pelos acionadores existentes, o painel durante uma coleta em blocos e seu término. O resultado da execução anterior é desconhecido; conferir dados já coletados antes de repetir chamadas pagas.

@@ -34,8 +34,8 @@ test("Radar conecta a seleção canônica, Workbench e Perfil sem ações fixas 
   assert.match(page, /onBulkSelectionChange=\{handleBulkSelectionChange\}/);
   assert.match(page, /model=\{activeWorkbenchData\?\.r3 \|\| null\}/);
   assert.match(page, /<RadarWorkbench/);
-  assert.match(profile, /Espelho do Radar Workbench/);
-  assert.match(profile, /Proveniência e identidade técnica/);
+  assert.match(profile, /Painel do artigo no Radar/);
+  assert.match(profile, /Ver fundamentos do Article/);
   assert.match(page, /buildRadarR3Model/);
   assert.match(page, /onOpenDetail=\{openDetail\}/);
   assert.match(profile, /Amazon/);

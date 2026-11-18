@@ -1,5 +1,8 @@
 # Backlog — Redator
 
+- [x] Ler as diretrizes de materiais baixáveis nos fundamentos e no briefing MCP, pela mesma projeção do CSV.
+- [ ] Conferir o bloco em um documento real e verificar o primeiro arquivo disponibilizado pelo redator.
+
 ## Defeitos do inventário de botões — 2026-10-18
 
 - [x] Cancelar a caixa de instrução não chama a IA paga.
