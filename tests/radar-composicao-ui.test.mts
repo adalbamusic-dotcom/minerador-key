@@ -45,29 +45,19 @@ test("A · nenhuma barra global de investigação é montada acima dos cards", (
 test("B · o contexto editorial não é painel principal: vive recolhido no dossiê", () => {
   const fonteWorkbench = workbench();
   const fonteDossie = dossie();
-
-  assert.doesNotMatch(fonteWorkbench, /CONTEXTO EDITORIAL/);
-  assert.doesNotMatch(fonteWorkbench, /radar-editorial-context/);
-
-  // O dado continua inteiro — dentro de <details>, e nunca aberto por padrão.
+  assert.doesNotMatch(fonteWorkbench, /CONTEXTO EDITORIAL|radar-editorial-context/);
   assert.match(fonteDossie, /radar-editorial-context/);
   assert.match(fonteDossie, /Proveniência e detalhes técnicos/);
   assert.doesNotMatch(fonteDossie, /<details[^>]*\sopen/);
   assert.ok(fonteDossie.indexOf("Proveniência e detalhes técnicos") < fonteDossie.indexOf("<EditorialContextDetails"));
 });
 
-test("B · a ausência de contexto aparece como selo compacto na faixa do Article", () => {
-  const fonte = workbench();
-  /*
-   * GATE 14.1 · o card "Conteúdo" deixou de existir.
-   *
-   * Fundamento não é etapa: o ArticleDNA passou a uma faixa de contexto sempre
-   * visível. O selo de contexto parcial continua — mudou de lugar, não de
-   * significado.
-   */
-  assert.match(fonte, /contexto parcial/i);
-  assert.match(fonte, /model\.editorialContext/);
-  assert.match(fonte, /data-testid="radar-article-context-band"/);
+test("B · a definição e o indicador de contexto parcial ficam no painel da linha", () => {
+  assert.doesNotMatch(workbench(), /radar-article-context-band|RadarR3ContentDossier/);
+  const perfil = readFileSync(new URL("../modules/radar/radar-r3-profile-mirror.tsx", import.meta.url), "utf8");
+  assert.match(perfil, /editorialContext=\{model\.editorialContext\}/);
+  assert.match(dossie(), /radar-article-dna-state/);
+  assert.match(dossie(), /Contexto parcial/);
 });
 
 /* ------------------------------- C e D ----------------------------------- */

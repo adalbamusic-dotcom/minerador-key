@@ -148,8 +148,10 @@ function aggregateLinks(
   };
 
   for (const silo of silos) {
-    if (!silo.graph) continue;
-    const facts = graphFacts(silo.graph);
+    const graph = silo.graph?.graph;
+    const approved = silo.approvedGraph ?? (silo.graph?.source === "approved" && graph && "graphVersionId" in graph ? graph : null);
+    if (!approved || approved.workflowStatus !== "approved") continue;
+    const facts = graphFacts({ source: "approved", graph: approved });
     const nodesById = new Map(facts.nodes.map(node => [node.nodeId, node]));
     const nameOf = (nodeId: string) => {
       const node = nodesById.get(nodeId);

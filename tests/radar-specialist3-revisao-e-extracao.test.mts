@@ -250,9 +250,9 @@ test("§8 · a tradução para o enum da projeção canônica é completa e reve
   assert.equal(radarSpecialistDecisionOf("inventada"), null);
 });
 
-test("§8 · só três decisões são ativas; NOT_APPROVED e REJECTED nunca são", () => {
+test("§8 · as decisões de uso são ativas; NOT_APPROVED e REJECTED ficam fora", () => {
   const ativas = RADAR_SPECIALIST_DECISIONS.filter(radarSpecialistDecisionIsActive);
-  assert.deepEqual([...ativas], ["ACCEPTED_EVIDENCE", "SUPPORT_ONLY", "QUOTE_CANDIDATE"]);
+  assert.deepEqual([...ativas], ["ACCEPTED_EVIDENCE", "SUPPORT_ONLY", "QUOTE_CANDIDATE", "MAIN_SUBJECT"]);
 });
 
 /* ================ §13 · a decisão gravada, e preservada ================ */

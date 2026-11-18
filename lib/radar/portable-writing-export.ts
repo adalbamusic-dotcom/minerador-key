@@ -13,6 +13,7 @@ import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "./competitive-blueprint.ts
 import { RADAR_EDITORIAL_OUTPUT_LABELS } from "./multimodal-blueprint.ts";
 import { radarPortableSpecialistContext, radarPortableVideoContext, radarPortableVideoUsageLine, type RadarPortableVideoExtract } from "./portable-annex-context.ts";
 import { radarPortableCompetitorsStructure, radarPortableWriterReadiness } from "./portable-dossier-gaps.ts";
+import { RADAR_DOWNLOAD_BRIEF_HEADING, radarDownloadBrief } from "./portable-writing-material.ts";
 import {
   radarPortableExternalSources,
   radarPortableInternalLinks,
@@ -1244,7 +1245,9 @@ export type RadarWritingSpecialistContribution = Contribuicao;
  * parecer de fechamento, CTA ou diretriz, que já sai inteiro na coluna
  * promessa_e_leitor — sem repetir o texto aprovado.
  */
-type Contribuicao = { rotulo: string; linha: string; aviso: string | null; secao: string | null; tipo: TipoDoParecer | null; resposta: string; referencia?: string };
+type Contribuicao = { rotulo: string; linha: string; aviso: string | null; secao: string | null; tipo: TipoDoParecer | null; resposta: string; referencia?: string; assuntoPrincipal?: true };
+
+export const RADAR_MAIN_SUBJECT_SPECIALIST_RULE = "Desenvolva a contribuição no corpo do artigo junto com perguntas, temas e evidências da SERP. Preserve o assunto e a intenção do ArticleDNA. Atribua a experiência ao especialista e qualifique divergências e afirmações sem fonte.";
 
 /*
  * ===== 2026-10-08 · P1 · A RESPOSTA APROVADA SAI INTEIRA =====
@@ -1299,10 +1302,11 @@ export function radarWritingSpecialistContributions(p: Projecoes, tituloDe: ((ca
       || item.questionsSent.map(frase => frase.match(/["“]([^"”]+)["”]/)?.[1]).find(Boolean)
       || null;
     /* 2026-10-08 · P1 · a resposta aprovada, inteira (sem o corte da síntese nem o de 400 caracteres). */
-    const resposta = radarWritingApprovedAnswer(item);
-    const tipo = tipoDoParecer(item.kind);
-    const aplicacao = tipo ? aplicacaoDoTipo(tipo, p.unidade) : ehPreenchimento(item.appliesTo) || /ainda n[aã]o definida/i.test(item.appliesTo) ? null : texto(item.appliesTo);
-    const secao = aplicacao && !tipo ? p.secoes.find(secao => {
+    const assuntoPrincipal = item.mainSubject === true;
+    const resposta = assuntoPrincipal ? texto(item.fullAnswer) || texto(item.contribution) : radarWritingApprovedAnswer(item);
+    const tipo = assuntoPrincipal ? null : tipoDoParecer(item.kind);
+    const aplicacao = assuntoPrincipal ? "assunto principal, no corpo do artigo" : tipo ? aplicacaoDoTipo(tipo, p.unidade) : ehPreenchimento(item.appliesTo) || /ainda n[aã]o definida/i.test(item.appliesTo) ? null : texto(item.appliesTo);
+    const secao = aplicacao && !tipo && !assuntoPrincipal ? p.secoes.find(secao => {
       const alvo = radarWritingContentWords(aplicacao);
       const cab = radarWritingContentWords(`${secao.heading} ${secao.readerQuestion || ""}`);
       return [...alvo].filter(palavra => cab.has(palavra)).length >= Math.max(1, Math.ceil(alvo.size / 2));
@@ -1321,7 +1325,7 @@ export function radarWritingSpecialistContributions(p: Projecoes, tituloDe: ((ca
      * definir" eram espera aberta no entregável. O aviso diz o que fazer com a
      * contribuição, concluído.
      */
-    if (!tipo && doAssunto.size && ![...doAssunto].some(palavra => radarWritingContentWords(item.contribution).has(palavra))) {
+    if (!tipo && !assuntoPrincipal && doAssunto.size && ![...doAssunto].some(palavra => radarWritingContentWords(item.contribution).has(palavra))) {
       avisos.push(`aceita, mas a resposta não trata de ${entreAspas(assunto || "")}: use só como orientação geral, sem apresentá-la como resposta a essa pergunta`);
     }
     if (!aplicacao) avisos.push("sem ponto de aplicação no pacote: entra onde couber, como orientação");
@@ -1333,7 +1337,7 @@ export function radarWritingSpecialistContributions(p: Projecoes, tituloDe: ((ca
       ? daPlanta ? `seção "${daPlanta}"` : aplicacao || "onde couber no texto, como orientação"
       : secao ? `seção "${tituloDe?.(secao.heading) || secao.heading}"` : aplicacao || "onde couber no texto, como orientação";
     const partes = (respostaDita: string) => [
-      `${rotulo} · Pergunta: ${entreAspas(assunto || pergunta || "ponto preparado pela investigação")}`,
+      assuntoPrincipal ? `${rotulo} · Parte do assunto principal` : `${rotulo} · Pergunta: ${entreAspas(assunto || pergunta || "ponto preparado pela investigação")}`,
       `Resposta aprovada: ${respostaDita}`,
       `Aplicar em: ${ondeAplicar}`,
       `Atribuir como: ${semPontoFinal(item.classification).toLowerCase()} de especialista, sem inventar nome ou credencial`,
@@ -1345,8 +1349,9 @@ export function radarWritingSpecialistContributions(p: Projecoes, tituloDe: ((ca
       tipo,
       resposta,
       aviso: avisos.length ? avisos.join("; ") : null,
-      linha: partes(entreAspas(resposta)),
+      linha: partes(assuntoPrincipal ? `“${resposta}”` : entreAspas(resposta)),
       ...(tipo ? { referencia: partes("inteira na coluna promessa_e_leitor") } : {}),
+      ...(assuntoPrincipal ? { assuntoPrincipal: true as const } : {}),
     };
   });
 }
@@ -3108,6 +3113,10 @@ function linhasDasFontesDeAutoridade(fontes: RadarAuthorityWriting, plano: Radar
 
 function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], videos: ReadonlyArray<{ rotulo: string; linha: string }>, plano: RadarArticleBlueprintPayload | null = null): string {
   const linhas: string[] = [];
+  const assuntoPrincipal = especialista.filter(item => item.assuntoPrincipal);
+  if (assuntoPrincipal.length) {
+    linhas.push("Especialista · assunto principal:", ...assuntoPrincipal.map(item => `- ${item.linha}`));
+  }
   const ymyl = p.autoridade?.ymylAssessment || null;
   if (ymyl) {
     const exigencia = ymyl.evidenceRequirements.map(item => radarWritingDecodeEntities(item)).find(item => !ehPreenchimento(item));
@@ -3200,8 +3209,9 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
   }
 
   /* 2026-10-08 · D10: o parecer ainda não aceito fica fora do texto — dito como regra cumprida, sem "aguardando" (como o CSV de vídeo, 2026-10-07). */
+  const pareceres = especialista.filter(item => !item.assuntoPrincipal);
   const pendentes = p.especialista.pending;
-  linhas.push(especialista.length
+  if (pareceres.length || !assuntoPrincipal.length) linhas.push(pareceres.length
     ? "Especialista:"
     : pendentes
       ? `Especialista: sem contribuição aceita; ${pendentes} parecer(es) ainda não aceito(s) no Radar ficam fora deste texto.`
@@ -3211,7 +3221,7 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
    * 2026-10-08 · P1 · fechamento, CTA e diretriz já saem inteiros na promessa: aqui, a remissão (sem repetir o texto).
    * Com o artigo-modelo, a promessa é a da planta, que não os traz: a resposta sai aqui, inteira.
    */
-  for (const item of especialista) linhas.push(`- ${plano ? item.linha : item.referencia ?? item.linha}`);
+  for (const item of pareceres) linhas.push(`- ${plano ? item.linha : item.referencia ?? item.linha}`);
 
   if (videos.length) {
     linhas.push("Trechos dos vídeos selecionados pela marca (embutir ou citar no ponto indicado, atribuído ao vídeo e ao canal; conferir o trecho no vídeo):");
@@ -3849,6 +3859,22 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
       linha.promessa_e_leitor,
       `Voz da marca: copy, CTA e transição comercial seguem a linha "Voz da marca" deste arquivo (Skill "${contexto.brandVoice.name}" v${contexto.brandVoice.version}). Oferta e página comercial só como a Skill e o plano de links permitem; sem inventar preço, prazo nem garantia.`,
     ].filter(Boolean).join("\n");
+  }
+
+  const assuntoDoEspecialista = especialista.filter(item => item.assuntoPrincipal);
+  if (linha.estrutura && assuntoDoEspecialista.length) {
+    linha.estrutura = [
+      `Contribuição para o assunto principal (${assuntoDoEspecialista.map(item => item.rotulo).join(", ")} na coluna fontes_e_especialista). ${RADAR_MAIN_SUBJECT_SPECIALIST_RULE}`,
+      linha.estrutura,
+    ].filter(Boolean).join("\n\n");
+  }
+
+  if (linha.estrutura && decisao.verdict !== "Não") {
+    const downloads = radarDownloadBrief(keywordsDoArtigo(p));
+    if (downloads.length) {
+      linha.estrutura = [[RADAR_DOWNLOAD_BRIEF_HEADING, ...downloads].join("\n"), linha.estrutura].join("\n\n");
+      linha.prompt += `\nSiga “${RADAR_DOWNLOAD_BRIEF_HEADING}” na coluna estrutura. Entregue o material como arquivo complementar e publique a chamada de download somente após conferir o endereço autorizado pela marca.`;
+    }
   }
 
   /* 2026-10-14 · F6 · a linha limpa uma vez: o CSV leva a do teto; o material (Redator e vídeo), a inteira. */

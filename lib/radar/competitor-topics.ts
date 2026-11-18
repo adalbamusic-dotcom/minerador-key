@@ -1,5 +1,6 @@
 import { radarCleanCompetitorHeading } from "./heading-cleanup.ts";
 import { radarSemanticStems } from "./semantic-concept-model.ts";
+import { radarNormalizedUrl } from "./research-reference.ts";
 import {
   radarCompetitorBrandOf,
   radarCompetitorHeadingIsChrome,
@@ -229,7 +230,7 @@ export function radarCompetitorHeadingIsNotTopic(cabecalho: string, contexto: Ra
 }
 
 /* A chave do endereço: sem protocolo, "www.", consulta, âncora e barra final. */
-const chaveDaUrl = (url: string) => url.replace(/^https?:\/\/(www\.)?/i, "").replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+const chaveDaUrl = radarNormalizedUrl;
 
 /**
  * Os esboços das páginas COMPARÁVEIS, das extrações gravadas. A lista de

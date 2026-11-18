@@ -109,7 +109,7 @@ export function radarSpecialistClassificationOf(value: unknown): RadarSpecialist
 /* ========================= a decisão humana (§6, §8) ======================= */
 
 /**
- * CINCO ESTADOS, E SÓ UM DELES É O PADRÃO.
+ * SÓ UM ESTADO É O PADRÃO.
  *
  * `NOT_APPROVED` não é "rejeitado": é "ninguém decidiu ainda". A distinção é o
  * gate inteiro — sem ela, uma contribuição que ninguém leu chegaria ao
@@ -120,6 +120,7 @@ export const RADAR_SPECIALIST_DECISIONS = [
   "ACCEPTED_EVIDENCE",
   "SUPPORT_ONLY",
   "QUOTE_CANDIDATE",
+  "MAIN_SUBJECT",
   "REJECTED",
 ] as const;
 export type RadarSpecialistDecision = typeof RADAR_SPECIALIST_DECISIONS[number];
@@ -129,11 +130,12 @@ export const RADAR_SPECIALIST_DECISION_LABELS: Record<RadarSpecialistDecision, s
   ACCEPTED_EVIDENCE: "Aceita como evidência",
   SUPPORT_ONLY: "Usada como apoio",
   QUOTE_CANDIDATE: "Marcada como citação literal",
+  MAIN_SUBJECT: "Incluída no assunto principal",
   REJECTED: "Rejeitada",
 };
 
 /** As decisões que fazem a contribuição chegar ao Planejador como evidência ativa. */
-const DECISOES_ATIVAS = new Set<RadarSpecialistDecision>(["ACCEPTED_EVIDENCE", "SUPPORT_ONLY", "QUOTE_CANDIDATE"]);
+const DECISOES_ATIVAS = new Set<RadarSpecialistDecision>(["ACCEPTED_EVIDENCE", "SUPPORT_ONLY", "QUOTE_CANDIDATE", "MAIN_SUBJECT"]);
 
 export function radarSpecialistDecisionIsActive(decision: RadarSpecialistDecision): boolean {
   return DECISOES_ATIVAS.has(decision);
@@ -147,11 +149,12 @@ export function radarSpecialistDecisionIsActive(decision: RadarSpecialistDecisio
  * contrato de análise valida. Traduzir aqui — num lugar só — é o que permite o
  * vocabulário da tela mudar sem tocar no contrato que já está em produção.
  */
-const DECISAO_PARA_PROJECAO: Record<RadarSpecialistDecision, "pending" | "accepted" | "support" | "quote" | "rejected"> = {
+const DECISAO_PARA_PROJECAO: Record<RadarSpecialistDecision, "pending" | "accepted" | "support" | "quote" | "main_subject" | "rejected"> = {
   NOT_APPROVED: "pending",
   ACCEPTED_EVIDENCE: "accepted",
   SUPPORT_ONLY: "support",
   QUOTE_CANDIDATE: "quote",
+  MAIN_SUBJECT: "main_subject",
   REJECTED: "rejected",
 };
 
@@ -160,6 +163,7 @@ const PROJECAO_PARA_DECISAO: Record<string, RadarSpecialistDecision> = {
   accepted: "ACCEPTED_EVIDENCE",
   support: "SUPPORT_ONLY",
   quote: "QUOTE_CANDIDATE",
+  main_subject: "MAIN_SUBJECT",
   rejected: "REJECTED",
 };
 
@@ -437,7 +441,7 @@ export function radarSpecialistExtraction(input: RadarSpecialistExtractionInput)
     originalText: verbatim,
     extractedSummary: summary,
     summarySource: source,
-    editorialUse: radarSpecialistEditorialUse(input),
+    editorialUse: decision === "MAIN_SUBJECT" ? "Desenvolver no assunto principal, em conjunto com a SERP." : radarSpecialistEditorialUse(input),
     /* Citação só existe por decisão humana: marcar é o ato que a cria. */
     quoteCandidate: decision === "QUOTE_CANDIDATE" && verbatim ? verbatim : null,
     provenance: {

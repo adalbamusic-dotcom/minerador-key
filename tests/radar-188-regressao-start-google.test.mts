@@ -364,7 +364,7 @@ test("RADAR 18.8 · K — o rótulo e o ⓘ não podem divergir entre as áreas"
   assert.match(componente, /title=\{acao\.blockedReason \|\| undefined\}/, "o bloqueio continua no botão, não no tooltip");
 
   /* E o slot da primeira camada continua mostrando motivo/hint em texto visível. */
-  const slot = trecho(fonte, "function Phase1Slot(", "* O ARTIGO INVESTIGADO");
+  const slot = trecho(fonte, "function Phase1Slot(", "* O RELATÓRIO RESPONDE PERGUNTAS");
   assert.match(slot, /\(acao\.blockedReason \|\| acao\.hint\) && <p /, "estado e erro ficam legíveis sem passar o mouse");
 });
 

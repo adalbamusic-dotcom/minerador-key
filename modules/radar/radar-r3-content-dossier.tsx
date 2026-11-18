@@ -1,4 +1,4 @@
-import { radarDeclaredKeywordIntent } from "@/lib/radar/editorial-identity";
+import { radarArticleDnaAddresses, radarDeclaredKeywordIntent } from "@/lib/radar/editorial-identity";
 import type { RadarR3Model } from "@/lib/radar/r3-workbench";
 import type { RadarEditorialContext } from "@/lib/radar/editorial-context";
 import type { RadarArticleResearchContext, RadarResearchKeyword } from "@/lib/radar/article-research-context";
@@ -7,6 +7,7 @@ import { buildRadarArticleDnaSummary, radarKeywordLines } from "@/lib/radar/oper
 
 type RadarR3ContentDossierProps = {
   model: RadarR3Model["content"];
+  article: RadarR3Model["article"];
   editorialContext?: RadarEditorialContext;
   /** O contexto estratégico resolvido — inspeção compacta, recolhida. */
   researchContext?: RadarArticleResearchContext;
@@ -139,10 +140,13 @@ function Fato({ label, value, tone }: { label: string; value: string | number | 
  *
  * Nada foi removido do modelo. O que era primeira camada virou segunda.
  */
-function ArticleFoundations({ context }: { context: RadarArticleResearchContext }) {
+function ArticleFoundations({ context, article }: { context: RadarArticleResearchContext; article: RadarR3Model["article"] }) {
   const resumo = buildRadarArticleDnaSummary(context);
   const linhas = radarKeywordLines(context);
   const perfilPorKeyword = new Map(context.keywords.map(keyword => [keyword.identity.keywordId, keyword]));
+  const addresses = article ? radarArticleDnaAddresses(article.payload) : null;
+  const identityTone = addresses?.published ? "text-identity-published" : "text-identity-new";
+  const linkClass = `break-all underline underline-offset-2 hover:text-module-accent focus-visible:ring-2 focus-visible:ring-focus ${identityTone}`;
 
   return <section className="rounded-md border border-divider bg-surface p-3" data-testid="radar-article-foundations" data-keyword-count={context.keywords.length}>
     <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -161,6 +165,25 @@ function ArticleFoundations({ context }: { context: RadarArticleResearchContext 
       <Fato label="Volume agregado" value={resumo.aggregateVolume} />
       <Fato label="Versão" value={resumo.version.slice(0, 8)} />
     </dl>
+
+    {addresses && <dl className="mt-3 space-y-1 border-t border-divider pt-3 text-sm" data-testid="radar-article-dna-addresses">
+      <div className="grid gap-x-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
+        <dt className="text-text-muted">Slug</dt>
+        <dd className={`break-all ${identityTone}`}>{addresses.slug}</dd>
+      </div>
+      {addresses.published && <div className="grid gap-x-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
+        <dt className="text-text-muted">URL publicada</dt>
+        <dd>{addresses.publishedUrl
+          ? <a className={linkClass} href={addresses.publishedUrl} target="_blank" rel="noreferrer">{addresses.publishedUrl}</a>
+          : <span className="text-text-muted">URL do Minerador não recebida nesta versão</span>}</dd>
+      </div>}
+      <div className="grid gap-x-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
+        <dt className="text-text-muted">Canonical</dt>
+        <dd>{addresses.canonical
+          ? <a className={linkClass} href={addresses.canonical} target="_blank" rel="noreferrer">{addresses.canonical}</a>
+          : <span className="text-text-muted">Não recebido nesta versão</span>}</dd>
+      </div>
+    </dl>}
 
     {/*
       * AS KEYWORDS EM UMA LINHA CADA.
@@ -197,10 +220,10 @@ function ArticleFoundations({ context }: { context: RadarArticleResearchContext 
   </section>;
 }
 
-export function RadarR3ContentDossier({ model, editorialContext, researchContext }: RadarR3ContentDossierProps) {
+export function RadarR3ContentDossier({ model, article, editorialContext, researchContext }: RadarR3ContentDossierProps) {
   const contextoParcial = Boolean(editorialContext && editorialContext.state !== "CURRENT_COMPLETE");
-  return <section className="space-y-4" aria-label="Dossiê de conteúdo do Radar">
-    {researchContext && <ArticleFoundations context={researchContext} />}
+  return <section className="space-y-2 pb-2" aria-label="Dossiê de conteúdo do Radar">
+    {researchContext && <ArticleFoundations context={researchContext} article={article} />}
     {/*
       * O QUE O DOSSIÊ ACUMULOU — em uma linha, não em quatro cards.
       *

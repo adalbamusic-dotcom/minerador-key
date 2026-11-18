@@ -1,5 +1,5 @@
 import type { RadarR3Model } from "@/lib/radar/r3-workbench";
-import { Field } from "@/components/editorial/operational-screen-shared";
+import { RadarR3ContentDossier } from "./radar-r3-content-dossier";
 import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
 import { radarR4AmazonStatusLabel, radarR4SerpStatusLabel } from "@/lib/radar/r4-queue";
 
@@ -26,21 +26,66 @@ type RadarR3ProfileMirrorProps = {
   research?: RadarR3ProfileResearch | null;
 };
 
-const section = "rounded-lg border border-divider bg-surface p-4";
+const disclosure = "cursor-pointer py-2 text-sm font-medium text-foreground hover:text-module-accent focus-visible:ring-2 focus-visible:ring-focus";
 
 export function RadarR3ProfileMirror({ model, architectHref, research = null }: RadarR3ProfileMirrorProps) {
   const r4 = model.r4;
-  return <div className="space-y-4" aria-label="Espelho do Radar Workbench" data-testid="radar-r3-profile-mirror">
-    <section className={section}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-module-accent">Perfil Radar · espelho do Workbench</p><h2 className="mt-1 text-lg font-semibold text-foreground">{model.title}</h2><ArticleSubjectLine phrase={model.researchContext?.article.subject?.phrase} showEmpty={Boolean(model.researchContext)} className="mt-1"/><p className="mt-1 text-sm text-text-muted">A tabela, o Workbench e este perfil usam os mesmos seletores R3. Expandir a linha não cria versão nem coleta dados.</p></div>{architectHref && <a className="inline-flex min-h-10 items-center rounded-md border border-divider px-3 py-2 text-sm text-foreground hover:border-context-accent hover:text-context-accent" href={architectHref}>Ver no Arquiteto</a>}</div><dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="ArticleDNA" value={model.articleDnaVersion}/><Field label="Keyword principal" tone="keyword" value={model.keyword}/><Field label="Silo / função" value={`${model.silo} · ${model.hierarchy}`}/><Field label="Modo" value={model.mode}/><Field label="Publicação" value={model.publication}/><Field label="Próxima ação" value={model.nextAction}/></dl></section>
-    <div className="grid gap-4 xl:grid-cols-2">
-      {research
-        ? <section className={section}><h3 className="text-base font-semibold text-foreground">SERP</h3><p className="mt-1 text-sm text-text-muted">{research.detail} · última coleta {model.serp.latestCollection}</p><dl className="mt-4 grid grid-cols-2 gap-3"><Field label="Analisadas" value={research.analyzed ?? "—"}/><Field label="Referências" value={research.references ?? "—"}/><Field label="Necessidades" value={model.serp.needs}/><Field label="Status" value={research.statusLabel}/></dl></section>
-        : <section className={section}><h3 className="text-base font-semibold text-foreground">SERP</h3><p className="mt-1 text-sm text-text-muted">{model.serp.provider} · {model.serp.resultCount} resultado(s) · última coleta {model.serp.latestCollection}</p><dl className="mt-4 grid grid-cols-2 gap-3"><Field label="Principais" value={model.serp.primaryCount}/><Field label="Pendentes" value={model.serp.pendingCount}/><Field label="Necessidades" value={model.serp.needs}/><Field label="Status" value={r4?.serp.state ? radarR4SerpStatusLabel(r4.serp.state) : model.serp.status}/></dl></section>}
-      <section className={section}><h3 className="text-base font-semibold text-foreground">Amazon</h3><p className="mt-1 text-sm text-text-muted">{r4 ? radarR4AmazonStatusLabel(r4.amazon) : model.amazon.label} · {model.amazon.detail}</p><dl className="mt-4 grid grid-cols-3 gap-3"><Field label="Produtos" value={model.amazon.productCount}/><Field label="Reviews" value={model.amazon.reviewCount}/><Field label="Critérios" value={model.amazon.criteriaCount}/></dl></section>
-      <section className={section}><h3 className="text-base font-semibold text-foreground">Conteúdo</h3><p className="mt-1 text-sm text-text-muted">Dossiê {model.content.articleDnaVersion} · principal: {model.content.principal}</p><dl className="mt-4 grid grid-cols-3 gap-3"><Field label="Necessidades" value={model.content.needs}/><Field label="Evidências" value={model.content.evidenceCount}/><Field label="Fontes" value={model.content.sourceCount}/></dl></section>
-      <section className={section}><h3 className="text-base font-semibold text-foreground">Especialista</h3><p className="mt-1 text-sm text-text-muted">{model.specialist.expert} · {model.specialist.channel} · {model.specialist.status}</p><dl className="mt-4 grid grid-cols-3 gap-3"><Field label="Pedidos" value={model.specialist.requestsSent}/><Field label="Recebidas" value={model.specialist.contributionsReceived}/><Field label="Revisadas" value={model.specialist.reviewedEvidence}/></dl>{r4?.topics.items.length ? <p className="mt-3 text-sm text-text-muted">{r4.topics.items.length} pauta(s) local(is) · {r4.topics.state}</p> : null}</section>
-    </div>
-    <section className={section}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-foreground">Relatório / decisão</h3><p className="mt-1 text-sm text-text-muted">{model.report.status} · {model.report.needs} necessidade(s) · {model.report.sentToWriter ? "Redator recebeu" : "Ainda não enviado"}</p></div><span className="text-sm text-foreground">{model.report.approved ? "Aprovado" : "Aguardando decisão humana"}</span></div><p className="mt-3 text-sm leading-5 text-text-muted">{model.report.summary}</p></section>
-    <details className={section}><summary className="cursor-pointer text-sm font-semibold text-foreground">Proveniência e identidade técnica</summary><dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Field label="brandId" value={model.provenance.brandId}/><Field label="articleId" value={model.provenance.articleId}/><Field label="articleDnaVersionId" value={model.provenance.articleDnaVersionId}/><Field label="Snapshot SERP" value={model.provenance.snapshotId || "Não disponível"}/><Field label="Provider" value={model.provenance.provider || "Não disponível"}/><Field label="Atualizado em" value={model.lastActivity || "Não informado"}/></dl></details>
-  </div>;
+  const serpStatus = research?.statusLabel ?? (r4?.serp.state ? radarR4SerpStatusLabel(r4.serp.state) : model.serp.status);
+  const serpDetail = research?.detail ?? `${model.serp.provider} · ${model.serp.resultCount} resultado(s)`;
+  const publication = model.article?.payload.publishedIdentityRef ? "Publicado e protegido" : model.publication;
+
+  return <section className="space-y-2 rounded-md border border-divider bg-surface p-3" aria-label="Painel do artigo no Radar" data-testid="radar-r3-profile-mirror">
+    <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+      <div className="min-w-0">
+        <h2 className="break-words text-lg font-semibold text-foreground">{model.title}</h2>
+        <ArticleSubjectLine phrase={model.researchContext?.article.subject?.phrase} className="mt-1"/>
+        <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-text-muted">
+          <span>{model.silo} · {model.hierarchy}</span>
+          <span>{publication}</span>
+          <span>ArticleDNA {model.articleDnaVersion}</span>
+        </p>
+      </div>
+      {architectHref && <a className="inline-flex min-h-10 items-center rounded-md border border-divider px-3 py-2 text-sm text-foreground hover:border-module-accent hover:text-module-accent focus-visible:ring-2 focus-visible:ring-focus" href={architectHref}>Ver no Arquiteto</a>}
+    </header>
+
+    <details className="border-t border-divider" data-testid="radar-article-foundations-details">
+      <summary className={disclosure}>Ver fundamentos do Article</summary>
+      <RadarR3ContentDossier model={model.content} article={model.article}
+        editorialContext={model.editorialContext} researchContext={model.researchContext} />
+    </details>
+
+    <details className="border-t border-divider">
+      <summary className={disclosure}>Investigação <span className="font-normal text-text-muted">· {serpStatus} · {serpDetail}</span></summary>
+      <div className="grid gap-x-6 gap-y-3 pb-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <section className="space-y-1 text-text-muted">
+          <h3 className="font-semibold text-foreground">SERP</h3>
+          <p>Última coleta · {model.serp.latestCollection}</p>
+          <p>{research ? `${research.analyzed ?? "—"} analisadas · ${research.references ?? "—"} referências` : `${model.serp.primaryCount} principais · Pendentes ${model.serp.pendingCount}`}</p>
+          <p>{model.mode} · {model.nextAction}</p>
+        </section>
+        <section className="space-y-1 text-text-muted">
+          <h3 className="font-semibold text-foreground">Conteúdo</h3>
+          <p>{model.content.needs} necessidades · {model.content.evidenceCount} evidências · {model.content.sourceCount} fontes</p>
+        </section>
+        <section className="space-y-1 text-text-muted">
+          <h3 className="font-semibold text-foreground">Amazon</h3>
+          <p>{r4 ? radarR4AmazonStatusLabel(r4.amazon) : model.amazon.label}</p>
+          <p>{model.amazon.detail}</p>
+          <p>{model.amazon.productCount} produtos · {model.amazon.reviewCount} reviews · {model.amazon.criteriaCount} critérios</p>
+        </section>
+        <section className="space-y-1 text-text-muted">
+          <h3 className="font-semibold text-foreground">Especialista</h3>
+          <p>{model.specialist.expert} · {model.specialist.channel} · {model.specialist.status}</p>
+          <p>{model.specialist.requestsSent} pedidos · {model.specialist.contributionsReceived} recebidas · {model.specialist.reviewedEvidence} revisadas</p>
+          {r4?.topics.items.length ? <p>{r4.topics.items.length} pauta(s) local(is) · {r4.topics.state}</p> : null}
+        </section>
+        <section className="space-y-1 text-text-muted sm:col-span-2 xl:col-span-4">
+          <h3 className="font-semibold text-foreground">Relatório / decisão</h3>
+          <p>{model.report.status} · {model.report.needs} necessidades · {model.report.approved ? "Aprovado" : "Aguardando decisão humana"} · {model.report.sentToWriter ? "Redator recebeu" : "Ainda não enviado"}</p>
+          {model.report.summary && <p>{model.report.summary}</p>}
+          {model.lastActivity && <p>Atualizado em {model.lastActivity}</p>}
+        </section>
+      </div>
+    </details>
+  </section>;
 }

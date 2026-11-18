@@ -109,22 +109,13 @@ test("GATE 14.1 · A e B — quatro áreas, e Conteúdo não é uma delas", () =
 test("GATE 14.1 · C e D — o ArticleDNA continua acessível, e continua read-only", () => {
   const fonte = workbench();
 
-  /* O dado não sumiu: virou faixa de contexto com os fundamentos a um clique. */
-  assert.match(fonte, /data-testid="radar-article-context-band"/, "ARTICLE_FOUNDATION_GLOBAL_SUMMARY");
-  assert.match(fonte, /data-testid="radar-article-foundations-details"/);
-  assert.match(fonte, /Ver fundamentos do Article/);
-  assert.match(fonte, /RadarR3ContentDossier/, "o dossiê inteiro continua sendo renderizado");
-  assert.match(fonte, /buildRadarArticleDnaSummary/);
-
-  /*
-   * READ_ONLY POR CONSTRUÇÃO.
-   *
-   * A faixa não recebe nenhum handler: não há como editar o fundamento a
-   * partir do Radar, nem por engano.
-   */
-  const faixa = fonte.slice(fonte.indexOf("function ArticleContextBand"), fonte.indexOf("O RELATÓRIO RESPONDE PERGUNTAS"));
-  assert.doesNotMatch(faixa, /onClick|onChange|onSubmit|onToggle/);
-  assert.doesNotMatch(faixa, /<button/);
+  const perfil = readFileSync(new URL("../modules/radar/radar-r3-profile-mirror.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(fonte, /radar-article-context-band|radar-article-foundations-details|RadarR3ContentDossier/);
+  const fundamentos = perfil.match(/<details[^>]*data-testid="radar-article-foundations-details"[\s\S]*?<\/details>/)?.[0];
+  assert.ok(fundamentos);
+  assert.match(fundamentos, /Ver fundamentos do Article/);
+  assert.match(fundamentos, /RadarR3ContentDossier/);
+  assert.doesNotMatch(fundamentos, /<button|onClick|onChange|onSubmit|onToggle/);
 });
 
 /* ==========  E, F, G, H e I · A INVESTIGAÇÃO TEM UM DONO SÓ  =========== */

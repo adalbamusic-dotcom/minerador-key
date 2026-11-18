@@ -51,6 +51,7 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
       { heading: "Custo", body: "Grátis para artigo ainda não finalizado: adotar não chama IA nem provider. Artigo já finalizado: a prévia diz em “Custo” o máximo do DataForSEO (só as keywords novas, cache primeiro) e até 2 chamadas de IA do artigo-modelo." },
       { heading: "Quem decide", body: "Você escolhe o que importar e o que adotar." },
       { heading: "Depois", body: "Abra o artigo e pesquise no Google (etapa 2)." },
+      { heading: "Conferir o endereço do artigo", body: "Na planilha, expanda a linha do artigo e abra “Ver fundamentos do Article”. Ali ficam o slug, o canonical e a URL publicada clicável quando há vínculo do Minerador." },
       { heading: "Situações comuns", body: "Artigo já finalizado (enviado ou não ao Redator) com a principal igual: “Adotar a versão nova” leva o artigo à versão nova e, na mesma confirmação, pesquisa só as keywords novas, finaliza de novo e organiza o artigo-modelo; a investigação antiga fica no histórico. Se já foi ao Redator, o documento de lá não muda: reenviar mostra “Atualização disponível”. Com a principal ou o slug novo, o artigo segue na versão enviada. Links novos do Silo são adotados sem refazer a pesquisa (“Adotar os links novos”)." },
     ],
     howToUse: [
@@ -124,9 +125,10 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
     description: "No cartão “Especialista”, cada ponto de revisão tem o próximo passo: “Criar consulta”, “Gerar link do convite”, “Aprovar pauta para envio” e “Enviar pedido ao especialista” (pelo Telegram). Quem tem acesso pode escrever direto em “Escrever o parecer aqui”.",
     sections: [
       { heading: "Quando usar", body: "Quando o artigo trata de tema que pede quem entende (saúde, dinheiro, técnica) ou quando a marca quer a voz do especialista no fechamento." },
-      { heading: "O que acontece", body: "A resposta chega e você decide: “Aceitar como evidência”, “Usar como apoio”, “Marcar citação literal” ou “Rejeitar”. Só o aceito vai ao pacote. O parecer escrito pelo próprio especialista logado (“Eu mesmo”) entra já aceito." },
+      { heading: "O que acontece", body: "A resposta chega e você decide: “Aceitar como evidência”, “Usar como apoio”, “Marcar citação literal”, “Incluir no assunto principal” ou “Rejeitar”. A inclusão leva a contribuição para o corpo do artigo, em conjunto com a SERP, no artigo-modelo e no CSV para escrever. O parecer escrito pelo próprio especialista logado (“Eu mesmo”) entra já aceito." },
       { heading: "Custo", body: "Grátis. “Sugestões por IA” para as perguntas da pauta usa a IA da marca." },
       { heading: "Quem decide", body: "Você aceita ou rejeita cada resposta." },
+      { heading: "Onde revisar", body: "Os botões de decisão ficam no resultado da revisão. Expanda as respostas recebidas para consultar o material de origem." },
       { heading: "Depois", body: "Siga para os acréscimos opcionais (etapa 6) ou envie ao Redator (etapa 7). Acrescentar depois de enviar gera pacote novo, e o Redator mostra a atualização." },
     ],
     howToUse: [
@@ -165,6 +167,7 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
       { heading: "Custo", body: "Enviar e exportar são grátis. Organizar a planta que falta: até 2 chamadas de IA por artigo, dito antes." },
       { heading: "Quem decide", body: "Você." },
       { heading: "Depois", body: "O artigo aparece no Redator para escrever." },
+      { heading: "Materiais para download", body: "Quando uma keyword do artigo pede um arquivo, o CSV e os fundamentos do Redator mostram o que produzir. O redator prepara o material fora da plataforma e só inclui a chamada depois de conferir o acesso do leitor." },
       { heading: "Situações comuns", body: "O envio em lote recusa o artigo sem planta e diz o motivo no aviso. O Radar não apaga artigos: nesta área não há botão de excluir." },
     ],
     howToUse: [

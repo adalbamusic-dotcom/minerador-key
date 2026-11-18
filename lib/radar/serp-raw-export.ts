@@ -31,6 +31,7 @@
  * Módulo puro: sem fetch, sem banco, sem relógio.
  */
 import { RADAR_SERP_LENS_LABELS, type RadarSerpLensLabel } from "./serp/lens-set.ts";
+import { radarNormalizedUrl } from "./research-reference.ts";
 import type { RadarFrozenSerpLens } from "./serp/frozen-lenses.ts";
 import type { RadarPortableSerpLensLookup, RadarPortableSerpObservedInput } from "./portable-serp-observed.ts";
 import type { RadarVideoLensOrganicReading } from "./video-competitive.ts";
@@ -172,8 +173,7 @@ const dominioDe = (url: string): string => {
     return "";
   }
 };
-/** A mesma página em dois endereços: sem protocolo, "www.", consulta, âncora e barra final. */
-const chaveDaUrl = (url: string | null | undefined) => texto(url).toLowerCase().replace(/^https?:\/\/(?:www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+const chaveDaUrl = (url: string | null | undefined) => radarNormalizedUrl(texto(url));
 const chaveDoTexto = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const rotuloDaLente = (lente: string) => ROTULO_DA_LENTE[lente as RadarSerpLensLabel] ?? lente;
 

@@ -5091,7 +5091,7 @@ export default function ArquitetoPage() {
          * é tocado: preencher `siloId` lá em cima para o Radar enxergar seria
          * alterar um artefato aprovado por conveniência de quem lê depois.
          */
-        const grafos = approvedLinkGraphs.length ? approvedLinkGraphs : await loadInternalLinkGraphs(selectedBrandId).catch(() => []);
+        const grafos = await loadInternalLinkGraphs(selectedBrandId);
         const siloVersoes = Object.values(acceptedSiloDnas);
         const paginas = Object.values(acceptedSiloPages);
         const contexto: Record<string, RadarArticleHandoffContext> = {};
@@ -5133,7 +5133,7 @@ export default function ArquitetoPage() {
               : null,
           };
         }
-        const result = await importApprovedToRadar(articleIds, masterList as Array<Record<string, unknown>>, serpByArticle, contexto, approvedLinkGraphs);
+        const result = await importApprovedToRadar(articleIds, masterList as Array<Record<string, unknown>>, serpByArticle, contexto, grafos);
         articlesSent = result.imported; skipped += result.skipped;
         for (const item of result.blocked) semSilo.push(`${nomeDoArtigo(item.articleId, item.label)}: ${item.reasons.join(" ")}`);
         // Recusa é DECLARADA, nunca item mudo — e depois do envio, para incluir
@@ -11185,7 +11185,7 @@ export default function ArquitetoPage() {
       plan: async bloco => (await pedirBloco(bloco, { mode: "plan" })).data.plan as SerpPaidPlan,
       // Nunca "só a principal": a coleta é sempre nas 4 lentes.
       ask: merged => perguntar(`Primeira coleta da SERP do lote · 4 lentes · ${describeArticleBatchSerpLot(lote)}`, merged, false),
-      onProgress: snapshot => setSerpBlockProgress(lote.blocks.length > 1 ? { process: "formation_serp", text: formatSerpBlockProgress(snapshot) } : null),
+      onProgress: snapshot => setSerpBlockProgress({ process: "formation_serp", text: formatSerpBlockProgress(snapshot) }),
       execute: async (bloco, escolha) => {
         const body = await pedirBloco(bloco, { mode: "execute", authorizedPaidQueries: escolha.authorizedPaidQueries });
         const lacunas: Array<{ keywordId: string; reason: string }> = Array.isArray(body.data?.gaps) ? body.data.gaps : [];
@@ -18706,14 +18706,16 @@ export default function ArquitetoPage() {
     || groupedArticles.some(group => group.planRows.length > 0)
   );
   /* O "Processo ativo" da aba Artigos: o mesmo texto de sempre, com a barra de progresso da plataforma, só enquanto algo roda. */
-  const articleProcessActivity = articleMode && (activeLogicalTask || serpBusy || activeKeywordReviewTask) ? (
+  const articleProcessActivity = articleMode && (activeLogicalTask || serpBusy || serpBlockProgress?.process === "formation_serp" || activeKeywordReviewTask || formationBusy) ? (
     <section role="status" className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-articles-process-activity">
-      <p className="text-sm font-semibold text-foreground">Processo ativo · {activeLogicalTask ? "Lógica" : serpBusy ? "SERP" : "IA"}</p>
+      <p className="text-sm font-semibold text-foreground">Processo ativo · {activeLogicalTask ? "Lógica" : serpBusy || serpBlockProgress?.process === "formation_serp" ? "SERP" : activeKeywordReviewTask ? "IA" : "Artigos"}</p>
       {activeLogicalTask
         ? <OperationProgress label={activeLogicalTask.message || "Processando grupos"} done={activeLogicalTask.current ?? null} total={activeLogicalTask.total ?? masterList.length} testId="architect-articles-process-progress" />
-        : serpBusy
+        : serpBusy || serpBlockProgress?.process === "formation_serp"
           ? <OperationProgress label="SERP em andamento" note={serpProgress || "consultas iniciadas"} testId="architect-articles-process-progress" />
-          : <OperationProgress label={activeKeywordReviewTask?.message || "Revisão de grupos"} note="proposta ainda não aplicada" testId="architect-articles-process-progress" />}
+          : activeKeywordReviewTask
+            ? <OperationProgress label={activeKeywordReviewTask.message || "Revisão de grupos"} note="proposta ainda não aplicada" testId="architect-articles-process-progress" />
+            : <OperationProgress label="Processando artigos" note="Aguarde a próxima etapa ou o resultado." testId="architect-articles-process-progress" />}
     </section>
   ) : null;
   const workbenchGrid = (

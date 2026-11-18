@@ -591,11 +591,12 @@ test("§3 · com duas perguntas, Subir e Descer voltam", async () => {
  * indistinguíveis de um botão quebrado.
  */
 
-test("§6 e §7 · as quatro decisões usam a mesma rota e todas confirmam na tela", async () => {
+test("§6 e §7 · todas as decisões usam a mesma rota e confirmam na tela", async () => {
   for (const caso of [
     { decision: "ACCEPTED_EVIDENCE", estado: "Aceita como evidência" },
     { decision: "SUPPORT_ONLY", estado: "Usada como apoio" },
     { decision: "QUOTE_CANDIDATE", estado: "Marcada como citação literal" },
+    { decision: "MAIN_SUBJECT", estado: "Incluída no assunto principal" },
     { decision: "REJECTED", estado: "Rejeitada" },
   ]) {
     const rede = servidor({
@@ -607,7 +608,7 @@ test("§6 e §7 · as quatro decisões usam a mesma rota e todas confirmam na te
     try {
       await tela.click(`radar-specialist-decision-${caso.decision}`);
 
-      /* MESMA ROTA para as quatro: nada de quatro implementações divergentes. */
+      /* As decisões compartilham a mesma rota. */
       const escritas = rede.escritas.filter(item => item.url.includes("/expert-contributions/review"));
       assert.equal(escritas.length, 1, caso.decision);
       assert.equal(escritas[0].body.decision, caso.decision);

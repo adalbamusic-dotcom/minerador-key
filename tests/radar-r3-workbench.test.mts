@@ -54,7 +54,7 @@ test("R3 expande uma área por vez e mantém Amazon sem API/ProductEvidence", ()
   assert.doesNotMatch(workbench, /RadarR3SerpPanel/);
   assert.match(workbench, /RadarR3ResearchDetails/);
   assert.match(workbench, /RadarR3AmazonPanel/);
-  assert.match(workbench, /RadarR3ContentDossier/);
+  assert.doesNotMatch(workbench, /RadarR3ContentDossier/);
   assert.match(workbench, /RadarR3SpecialistPanel/);
   assert.doesNotMatch(workbench, /ReportBlock/);
   assert.doesNotMatch(workbench, /RadarActivitySummary/);
@@ -135,17 +135,9 @@ test("R4 mantém identidade, quatro cards fixas e relatório fora do estado fech
   assert.doesNotMatch(workbench, /min-h-28|min-h-32/, "o card não reserva altura para texto explicativo");
   assert.doesNotMatch(workbench, /Prévia consolidada/);
   assert.match(workbench, /StatusMark/);
-  /*
-   * GATE 14.1 · o fundamento voltou ao cabeçalho — em uma linha, não em grade.
-   *
-   * O guard antigo proibia keyword/silo/hierarquia no Workbench porque eles
-   * vinham como a grade de seis colunas do layout legado. A faixa de contexto é
-   * o oposto disso: uma linha, sem `<dl>`, sem card, e sem nenhum handler.
-   */
-  assert.match(workbench, /data-testid="radar-article-context-band"/);
-  assert.doesNotMatch(workbench, /<ContextValue/, "a grade de contexto legada não volta");
-  const faixa = workbench.slice(workbench.indexOf("function ArticleContextBand"), workbench.indexOf("O RELATÓRIO RESPONDE PERGUNTAS"));
-  assert.doesNotMatch(faixa, /onClick|onChange|onToggle/, "ARTICLE_DNA_READ_ONLY: a faixa não recebe handler");
+  assert.doesNotMatch(workbench, /radar-article-context-band|RadarR3ContentDossier|<ContextValue/);
+  const perfil = read("../modules/radar/radar-r3-profile-mirror.tsx");
+  assert.match(perfil, /radar-article-foundations-details/);
   assert.match(page, /activeArticleId/);
   assert.match(page, /selectedArticleIds/);
   assert.match(page, /bulkSelectedRowIds=\{bulkSelectedRowIds\}/);

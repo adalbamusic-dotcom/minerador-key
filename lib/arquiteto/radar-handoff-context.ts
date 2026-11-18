@@ -192,11 +192,12 @@ export function findApprovedGraphForSilo(input: {
   silo: ResolvedSiloContext;
   graphs: readonly InternalLinkGraph[];
 }): InternalLinkGraph | null {
-  return input.graphs.find(graph =>
-    graph.workflowStatus === "approved"
-    && graph.siloId === input.silo.siloId
-    && graph.baseSiloDnaVersionRef?.versionId === input.silo.siloDnaVersionId
-    && (!input.silo.siloPageVersionId || graph.baseSiloPageVersionRef?.versionId === input.silo.siloPageVersionId)) || null;
+  const current = input.graphs
+    .filter(graph => graph.workflowStatus === "approved" && graph.siloId === input.silo.siloId)
+    .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+  if (current?.baseSiloDnaVersionRef?.versionId !== input.silo.siloDnaVersionId) return null;
+  if (input.silo.siloPageVersionId && current?.baseSiloPageVersionRef?.versionId !== input.silo.siloPageVersionId) return null;
+  return current ?? null;
 }
 
 /**

@@ -37,6 +37,7 @@
  * Detectores de palavras sobre dados já extraídos, não de sentido.
  * Módulo puro: sem fetch, sem banco, sem relógio, sem IA.
  */
+import { radarNormalizedUrl } from "./research-reference.ts";
 import {
   radarResearchNeighborArea,
   radarResearchOtherProfession,
@@ -188,7 +189,7 @@ export type RadarCompetitiveReading = {
 
 const texto = (valor: unknown): string => (typeof valor === "string" ? valor.replace(/\s+/g, " ").trim() : "");
 const semAcento = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-const chaveDaUrl = (url: string | null | undefined) => texto(url).toLowerCase().replace(/^https?:\/\/(?:www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+const chaveDaUrl = (url: string | null | undefined) => radarNormalizedUrl(texto(url));
 const chave = (valor: string) => semAcento(valor).replace(/[^a-z0-9]+/g, " ").trim();
 const dominio = (valor: string | null | undefined) => radarRegistrableDomain(texto(valor)) || texto(valor).replace(/^www\./, "");
 

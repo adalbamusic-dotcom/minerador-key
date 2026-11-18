@@ -145,7 +145,7 @@ export function ArticlesFormationBar({
       >
         {"Melhorar publicados…"}
       </button>
-      <InfoHint title="Melhorar publicados" description="Abre a revisão de publicados e artigos já formados. Confira a proposta e os custos antes de confirmar." />
+      <InfoHint title="Melhorar publicados" description="Revise as keywords pelo assunto do slug publicado. A página sem volume pode ganhar uma principal com volume e com o mesmo recorte. Confira a proposta e os custos antes de confirmar." />
       <span className={`text-sm ${selectionScope.reason && regulares > 0 ? "text-warning" : "text-text-muted"}`} data-testid="architect-articles-selection-count">
         {total === 0
           ? selectionScope.reason

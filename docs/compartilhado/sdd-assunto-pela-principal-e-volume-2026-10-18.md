@@ -1,5 +1,7 @@
 # SDD — O Assunto pela principal e pelo volume (reprocessar o modo antigo) — 2026-10-18
 
+**Adendo de 2026-11-18 — publicados.** O slug da URL publicada é a referência do recorte. A tolerância anterior a uma principal ampla que omite esse recorte fica **SUBSTITUÍDA**. Se a candidata tem volume e preserva o que o slug declara, o usuário pode aprová-la na prévia. Keywords de apoio compatíveis são avaliadas pela SERP; termos de outro nicho saem da composição proposta. A versão confirmada substitui a cobertura anterior. Ver §49 da spec do Arquiteto.
+
 > **Status: APROVADA (dono, 2026-10-18).** Respostas do dono:
 > - "Sem média" do Google Ads conta como volume 0.
 > - O "volume 0 vira Assunto" acontece no "Aprovar e enviar", com prévia; o botão Volume só mede.

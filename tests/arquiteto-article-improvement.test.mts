@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { allocateReinforcementChoices } from "../lib/arquiteto/reinforcement-allocation.ts";
-import { planArticleImprovements, volumelessPrincipalSwap, carriesSlugCore, slugCoreWords, principalIsIdentity, targetPrincipalIsIdentity, improvementEditorialFit, improvementCopyLine, copyLineMatch, improvementDiscoverySeeds, COPY_LINE_LABEL, SUBJECT_KEYWORD_STAYS_SUBJECT_REASON, type ImprovementTarget, type ImprovementKeyword, type ImprovementEvidence, type ImprovementSerpVocabulary } from "../lib/arquiteto/article-improvement.ts";
+import { planArticleImprovements, volumelessPrincipalSwap, carriesSlugCore, slugCoreWords, principalIsIdentity, targetPrincipalIsIdentity, improvementEditorialFit, improvementCopyLine, copyLineMatch, improvementDiscoverySeeds, readPublishedSerpScope, COPY_LINE_LABEL, SUBJECT_KEYWORD_STAYS_SUBJECT_REASON, type ImprovementTarget, type ImprovementKeyword, type ImprovementEvidence, type ImprovementSerpVocabulary } from "../lib/arquiteto/article-improvement.ts";
 import { resolveKeywordDnaSignals } from "../lib/arquiteto/keyword-dna-signals.ts";
 import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 
@@ -9,6 +9,35 @@ const dna = (id: string, text = "captação de pacientes") => resolveKeywordDnaS
 const term = (id: string, overrides: Partial<ImprovementKeyword> = {}): ImprovementKeyword => ({ id, keyword: `captação de pacientes ${id}`, volume: 50, volumeValidated: true, signals: dna(id), ownerId: null, published: false, territoryRef: "territory:b", external: false, ...overrides });
 const page = (id: string, overrides: Partial<ImprovementTarget> = {}): ImprovementTarget => ({ id, kind: "published", theme: `captação de pacientes ${id}`, note: null, primaryId: id, post: "free", memberIds: [id], territoryRef: "territory:a", slug: `captacao-de-pacientes-${id}`, url: `https://example.test/${id}`, canonical: `https://example.test/${id}`, signals: dna(id), ...overrides });
 const proof = (targetId: string, keywordId: string, overrides: Partial<ImprovementEvidence> = {}): ImprovementEvidence => ({ targetId, keywordId, complete: true, sharedPages: 4, contradiction: false, anchorConclusive: true, ...overrides });
+
+test("publicados: com o mesmo recorte lexical, resultados do nicho têm precedência sobre mais volume", () => {
+  const topic = "agência de marketing para clínica de estética";
+  const target = page("page", { theme: topic, slug: "agencia-de-marketing-para-clinica-de-estetica", principalSubject: { keywordId: "page", volumeState: "zero" } });
+  const keywords = [
+    term("page", { keyword: topic, published: true, volume: 0, volumeValidated: false }),
+    term("broad", { keyword: "agência de marketing digital para clínicas", volume: 600 }),
+    term("focused", { keyword: "agência de marketing para clínicas de estética", volume: 20 }),
+  ];
+  const evidence = [
+    proof("page", "page", { publishedSerpScope: { matchingTitles: 0, totalTitles: 8 } }),
+    proof("page", "broad", { publishedSerpScope: { matchingTitles: 1, totalTitles: 8 } }),
+    proof("page", "focused", { publishedSerpScope: { matchingTitles: 5, totalTitles: 8 } }),
+  ];
+  const [proposal] = planArticleImprovements({ targets: [target], keywords, evidence });
+  assert.equal(proposal.principalId, "focused");
+  assert.ok(proposal.reasons.some(reason => reason.includes("Principal atual") && reason.includes("0 de 8")));
+  assert.ok(proposal.reasons.some(reason => reason.includes("Candidata à principal") && reason.includes("5 de 8")));
+});
+
+test("Instagram: o título de resultado precisa mencionar pacientes; perguntas e repetição entre lentes não contam", () => {
+  const target = page("instagram", { slug: "instagram-nao-traz-pacientes" });
+  const vocabulary = { keywordId: "instagram", lenses: 4, relatedSearches: [], questions: ["Como atrair pacientes pelo Instagram?"], titles: [
+    "Instagram para lojas", "Como vender mais pelo Instagram", "Captação de pacientes pelo Instagram",
+    "Aumente seus seguidores", "O que postar no Instagram", "Captação de pacientes pelo Instagram",
+  ] };
+  assert.deepEqual(readPublishedSerpScope(target, vocabulary), { matchingTitles: 1, totalTitles: 5 });
+  assert.equal(readPublishedSerpScope(target, { ...vocabulary, lenses: 3 }), undefined);
+});
 
 test("artigo cheio não reserva a única keyword de outro destino", () => {
   const result = allocateReinforcementChoices({ targets: [{ id: "full", capacity: 0 }, { id: "open", capacity: 1 }], edges: [{ targetId: "full", keywordId: "k", tier: 0, score: 8, volume: 30 }, { targetId: "open", keywordId: "k", tier: 0, score: 4, volume: 30 }] });
@@ -96,19 +125,21 @@ test("caso real captar clientes × atrair pacientes: sinônimos não resolvem a 
 });
 // As duas páginas abaixo têm principal FORA da identidade ("captação de pacientes a/b" não é o slug delas): a troca vale (2026-10-17).
 const foraDaIdentidade = { a: "como-captar-clientes-para-clinica-de-estetica", b: "como-atrair-pacientes-para-clinica-de-estetica" };
-test("caso real 2026-09-30: captar × atrair ficam distintos quando cada um recebe keywords próprias da lista", () => {
+test("captar × atrair recebem reforços diferentes sem perder o público do slug na principal", () => {
   const a = page("a", { theme: "como captar clientes para clínica de estética", slug: foraDaIdentidade.a }), b = page("b", { theme: "como atrair pacientes para clínica de estética", slug: foraDaIdentidade.b });
   const keywords = [term("a", { published: true, volume: 0, volumeValidated: false }), term("b", { published: true, volume: 0, volumeValidated: false }), term("ka", { keyword: "como captar clientes", volume: 390 }), term("kb", { keyword: "como atrair clientes pelo instagram", volume: 90 })];
   const result = planArticleImprovements({ targets: [a, b], keywords, evidence: [proof("a", "ka"), proof("b", "kb")] });
   assert.ok(result.every(p => p.status === "ready"), JSON.stringify(result.map(p => [p.status, p.reasons])));
-  assert.equal(result[0].principalId, "ka"); assert.equal(result[1].principalId, "kb");
-  assert.deepEqual(result[0].exclusions, ["como atrair clientes pelo instagram"]);
-  assert.deepEqual(result[1].exclusions, ["como captar clientes"]);
-  assert.match(result[0].reasons.join(" "), /keywords próprias da lista/);
+  assert.equal(result[0].principalId, "a"); assert.equal(result[1].principalId, "b");
+  assert.ok(result[0].memberIds.includes("ka")); assert.ok(result[1].memberIds.includes("kb"));
+  assert.ok(!result[0].memberIds.includes("kb"));
+  assert.ok(!result[1].memberIds.includes("ka"));
 });
 test("ângulos distintos são registrados com exclusões recíprocas", () => {
   const a = page("a", { theme: "como captar clientes para clínica de estética", slug: foraDaIdentidade.a }), b = page("b", { theme: "como atrair pacientes para clínica de estética", slug: foraDaIdentidade.b });
-  const ka = term("ka"), kb = term("kb"); ka.signals.modifiers = ["WhatsApp e agendamento"]; kb.signals.modifiers = ["indicações de pacientes"];
+  const ka = term("ka", { keyword: "captar clientes para clínica pelo whatsapp" });
+  const kb = term("kb", { keyword: "atrair pacientes para clínica por indicação" });
+  ka.signals.modifiers = ["WhatsApp e agendamento"]; kb.signals.modifiers = ["indicações de pacientes"];
   const result = planArticleImprovements({ targets: [a, b], keywords: [term("a", { published: true, volume: 0, volumeValidated: false }), term("b", { published: true, volume: 0, volumeValidated: false }), ka, kb], evidence: [proof("a", "ka"), proof("b", "kb")] });
   assert.ok(result.every(p => p.status === "ready"));
   assert.deepEqual(result[0].exclusions, [result[1].angle]); assert.deepEqual(result[1].exclusions, [result[0].angle]);
@@ -121,7 +152,7 @@ test("sem páginas em comum, a principal nova precisa caber no slug: 'agência d
   assert.notEqual(result.principalId, "generica");
   assert.deepEqual(result.addIds, []);
 });
-test("decisão 2026-09-30: publicado Livre sem volume ganha principal mais ampla que leva o núcleo do slug; cabeça genérica enorme continua fora", () => {
+test("publicado Livre sem volume usa a ampla como reforço quando ela perde o recorte do slug", () => {
   const slug = "checklist-de-plano-de-marketing-para-clinica-de-estetica";
   assert.deepEqual(slugCoreWords(slug), ["plano", "marketing"]);
   assert.equal(carriesSlugCore(slug, { keyword: "exemplo de plano de marketing", volume: 1300 }), true);
@@ -142,9 +173,9 @@ test("decisão 2026-09-30: publicado Livre sem volume ganha principal mais ampla
   const evidence = [proof("chk", "amplo", { sharedPages: 0, anchorConclusive: false }), proof("chk", "cabeca", { sharedPages: 0, anchorConclusive: false })];
   const livre = planArticleImprovements({ targets: [alvo], keywords, evidence })[0];
   assert.equal(livre.status, "ready", JSON.stringify(livre));
-  assert.equal(livre.principalId, "amplo");
+  assert.equal(livre.principalId, "chk");
+  assert.ok(livre.memberIds.includes("amplo"));
   assert.ok(!livre.memberIds.includes("cabeca"));
-  assert.match(livre.reasons.join(" "), /Principal mais ampla, com volume/);
   const travado = planArticleImprovements({ targets: [{ ...alvo, post: "locked" }], keywords, evidence })[0];
   assert.equal(travado.principalId, "chk", "Travado não troca");
   // Principal de identidade (o slug foi feito dela): fica; a mais ampla entra como secundária e reforça o contexto; a cabeça enorme continua fora.
@@ -154,6 +185,29 @@ test("decisão 2026-09-30: publicado Livre sem volume ganha principal mais ampla
   assert.deepEqual(identidade.addIds, ["amplo"]);
   assert.ok(!identidade.memberIds.includes("cabeca"));
   assert.ok(!identidade.reasons.some(reason => /Principal mais ampla/.test(reason)));
+});
+
+test("publicados: SERP em comum não promove uma principal genérica nem mantém apoio do outro nicho", () => {
+  const semantic = { entidade_central: "agência de marketing", problema_percebido: "escolher agência" };
+  const signals = (id: string, text: string) => resolveKeywordDnaSignals({ keywordId: id, text, semantic });
+  const pageTopic = "agência de marketing para clínica de estética";
+  const old = term("page", { keyword: pageTopic, published: true, volume: 0, volumeValidated: false, signals: signals("page", pageTopic) });
+  const makeTerm = (id: string, keyword: string, volume: number) => term(id, { keyword, volume, signals: signals(id, keyword) });
+  const broad = makeTerm("broad", "agência de marketing digital", 1900);
+  const cosmetics = makeTerm("cosmetics", "agência de marketing para cosméticos", 500);
+  const clinic = makeTerm("clinic", "agência de marketing para clínicas", 20);
+  const target = page("page", {
+    theme: pageTopic, slug: "agencia-de-marketing-para-clinica-de-estetica",
+    signals: old.signals, primaryId: broad.id, memberIds: [old.id, broad.id, cosmetics.id],
+    principalSubject: { keywordId: old.id, volumeState: "zero" },
+  });
+  const evidence = [broad, cosmetics, clinic].map(keyword => proof(old.id, keyword.id, { sharedPages: 4 }));
+  const [proposal] = planArticleImprovements({ targets: [target], keywords: [old, broad, cosmetics, clinic], evidence });
+  assert.equal(proposal.status, "ready", JSON.stringify(proposal));
+  assert.equal(proposal.principalId, clinic.id);
+  assert.equal(proposal.subjectKeywordId, old.id);
+  assert.ok(!proposal.memberIds.includes(cosmetics.id));
+  assert.ok(proposal.removeIds.includes(cosmetics.id));
 });
 
 test("principal sem volume com Posto Livre FORA da identidade: a secundária com mais volume do próprio artigo assume, sem entrar nem sair nada, mesmo sem par da SERP (caso 'instagram não traz pacientes', 2026-10-01); de identidade, fica (2026-10-17)", () => {

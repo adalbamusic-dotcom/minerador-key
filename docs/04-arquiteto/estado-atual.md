@@ -1,3 +1,11 @@
+## Assunto dos publicados e grafo vigente — 2026-11-18
+
+**Leitura de recorte na SERP.** A revisão atual lê do cache os títulos da principal e das candidatas a principal dos publicados. Mostra a proporção de títulos que trazem o recorte do slug e usa essa proporção na ordenação. A prévia de versão anterior pede nova preparação. Cobertura automatizada com fixtures; validar a leitura com o artigo publicado no Radar após executar a prévia real.
+
+Implementado localmente em **Melhorar publicados** e no envio de Links. A prévia lê o slug da URL publicada e usa os modificadores do slug para distinguir, por exemplo, clínica de estética de cosméticos. A gravação reconstrói a cobertura pelas keywords vigentes e deixa a identidade publicada intacta. A execução de melhoria passou à versão 2, o que pede uma prévia nova quando a anterior ainda estiver aberta.
+
+O seletor compartilhado do handoff e da adoção do Radar escolhe o último grafo aprovado do Silo e valida o vínculo. A exportação editorial lê o grafo aprovado e a cópia de trabalho permanece disponível para backup. Mudança de leitura e de composição no código local. Validação com os cenários de melhoria, envio e adoção em fixtures. Reprocessamento de registros reais e deploy pendentes.
+
 ## Eventos editoriais sem leitura truncada — 2026-11-16
 
 **Correção local testada com fixtures; leitura no navegador, validação de exclusão pendente.** A leitura de eventos de status usada na mesa e na atualização incremental era limitada pelo teto do servidor: um evento posterior de rejeição poderia ficar de fora e a versão parecer ativa. Agora a leitura pagina com ordenação estável e contagem, recusa páginas repetidas ou incompletas e mantém o recorte pelas versões da marca. `arquiteto-eventos-paginacao` cobre 1.002 eventos com limite de 137 por página, página repetida e contagem ausente; as suítes de servidor e de cenários passaram. No navegador local, a mesa recarregou 84 keywords e 2 Silos; isso não reproduz o caso com mais de 1.000 eventos. As leituras continuam não transacionais, e a alteração não apaga dados históricos.
@@ -8560,3 +8568,6 @@ bloqueado real — o caso que motivou a SDD foi destravado antes da entrega.
 ## Prévia longa da coleta SERP — 2026-11-16
 
 **Correção local e teste no navegador:** a prévia da coleta em lote cortava o título longo e escondia os botões, pois apenas a tabela interna rolava. O mesmo diálogo agora permite rolar todo o conteúdo e receber foco pelo teclado. Na prévia real da AdalbaPro, a rolagem chegou aos botões Cancelar e Pagar e validar; nenhuma opção foi acionada durante a conferência. Não muda o custo nem a autorização da coleta. A versão publicada ainda depende de deploy.
+## Visibilidade do processamento de artigos — 2026-11-16
+
+**Correção local:** o painel de processo existente passa a acompanhar o progresso da coleta em blocos iniciado por Processar artigos, inclusive quando a trava separada de validação SERP está inativa. Em outras fases mostra processamento sem estimar conclusão. A execução relatada não teve resultado confirmado: a aba e o servidor da sessão anterior não estavam mais disponíveis. Reteste pelos acionadores ainda pendente; nenhuma chamada paga foi iniciada nesta alteração.

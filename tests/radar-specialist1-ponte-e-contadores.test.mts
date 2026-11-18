@@ -497,7 +497,10 @@ test("SPECIALIST_1 · §8 — resposta de pauta avulsa é mostrada como ainda n�
   const { tela, servidor } = await montarPainel({ experts: [expertAtivo], briefs: [pautaAvulsa], contributions: [contribuicao] }, [requisito]);
   try {
     assert.ok(tela.get("radar-specialist-entry").textContent?.includes("Contribuição ainda não associada a um ponto de revisão."));
-    assert.ok(tela.get("radar-specialist-result-unassigned").textContent?.includes("não é feita automaticamente sem evidência suficiente"));
+    const resultado = tela.get("radar-specialist-result-unassigned");
+    assert.match(resultado.textContent || "", /Respostas sem ponto de revisão associado/);
+    assert.ok(resultado.querySelector('select[aria-label="Relacionar a outro ponto de revisão"]'));
+    assert.equal(tela.get("radar-specialist-entry").closest("details")?.open, false, "a caixa de entrada fica recolhida");
     /* O ponto continua preparado: a resposta avulsa não o resolve. */
     assert.ok(tela.get("radar-specialist-review-point").textContent?.includes("Ponto preparado"));
   } finally {

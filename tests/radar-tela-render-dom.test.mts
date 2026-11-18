@@ -130,6 +130,23 @@ test("trocar de artigo: nenhuma view recalculada, e a tela é a mesma de uma rel
   }
 });
 
+test("os fundamentos pertencem à linha expandida, mesmo com outro artigo em foco", async () => {
+  const workbench = tela.get("radar-r3-workbench");
+  assert.equal(workbench.querySelector("[data-testid='radar-article-foundations-details']"), null);
+  const artigoEmFoco = workbench.querySelector("h1")?.textContent;
+  const outraLinha = linhas()[1];
+  const expandir = outraLinha.querySelector<HTMLButtonElement>("button[aria-label='Abrir detalhes']");
+  assert.ok(expandir);
+  await act(() => expandir.click());
+  const painel = tela.get("radar-r3-profile-mirror");
+  assert.ok(painel.querySelector("[data-testid='radar-article-foundations-details']"));
+  assert.equal(painel.querySelector("h2")?.textContent, outraLinha.querySelector("strong")?.textContent);
+  assert.equal(workbench.querySelector("h1")?.textContent, artigoEmFoco);
+  const recolher = outraLinha.querySelector<HTMLButtonElement>("button[aria-label='Fechar detalhes']");
+  assert.ok(recolher);
+  await act(() => recolher.click());
+});
+
 test("checkbox: nenhuma view recalculada, tela igual à fria", async () => {
   const views = await medirViews(() => { caixas()[1].click(); });
   assert.equal(views, 0);

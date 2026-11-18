@@ -146,3 +146,7 @@ Uma única planilha.
 12. depois Proposal IA.
 
 
+## Vigência na entrega — 2026-11-18
+
+No envio ao Radar e na adoção, o seletor usa o maior número entre as versões aprovadas do Silo; confere em seguida SiloDNA, SiloPage e participação da versão do artigo. Uma versão incompatível não reativa o grafo aprovado anterior. A exportação editorial usa o grafo aprovado, enquanto a cópia em revisão fica no editor e no backup. O grafo já transportado pelo Radar é substituído pela ação existente de adoção.
+

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
+import { RadarR3ProfileMirror } from "../modules/radar/radar-r3-profile-mirror.tsx";
 import { RadarR3Workbench } from "../modules/radar/radar-r3-workbench.tsx";
 import { buildRadarDeepResearchView } from "../lib/radar/deep-research-view.ts";
 import { startRadarDeepResearch } from "../lib/radar/deep-research.ts";
@@ -168,7 +169,7 @@ const espioes = (): Espioes => ({ start: 0, analyze: 0, finalize: 0, reset: 0, r
  * CAMINHO — clique no DOM, evento do React, handler correto — e não o que cada
  * handler faz depois, que os Gates anteriores já cobrem.
  */
-async function montarTela(view: ReturnType<typeof vista> | undefined, extra: Record<string, unknown> = {}) {
+async function montarTela(view: ReturnType<typeof vista> | undefined, extra: Record<string, unknown> = {}, comPerfil = false) {
   const spy = espioes();
   const tela = await montarRadar();
   const props = {
@@ -195,7 +196,8 @@ async function montarTela(view: ReturnType<typeof vista> | undefined, extra: Rec
   await tela.render(comProductShell(React.createElement(
     SupabaseSessionProvider, null,
     React.createElement(GlobalNoticeProvider, null,
-      React.createElement(RadarR3Workbench, props as never)),
+      React.createElement(RadarR3Workbench, props as never),
+      comPerfil ? React.createElement(RadarR3ProfileMirror, { model: props.model, architectHref: null, articleHref: null }) : null),
   )));
   return { tela, spy, props };
 }
@@ -442,10 +444,34 @@ test("GATE 15.2 · N — clicar nas quatro áreas não dispara operação nenhum
 
 /* ==============  O · EXPANDIR É LEITURA  ============================== */
 
-test("GATE 15.2 · O — abrir fundamentos e detalhes não executa workflow", async () => {
-  const { tela, spy } = await montarTela(vista());
+test("o painel ArticleDNA mostra o endereço publicado do Minerador ou apenas o canonical do novo", async () => {
+  const canonical = "https://site.test/skincare/canonical";
+  const publishedUrl = "https://site.test/skincare/No-Ar/";
+  const dia = { suggestedSlug: "proposta-do-artigo", canonical };
+  for (const caso of [
+    { payload: dia, links: [canonical], slug: dia.suggestedSlug },
+    { payload: { ...dia, publishedIdentityRef: { publicationStatus: "published_protected", source: "keyword_dna", slug: "No-Ar", publishedUrl, canonical } }, links: [publishedUrl, canonical], slug: "No-Ar" },
+    { payload: { ...dia, publishedIdentityRef: { publicationStatus: "published_protected", source: "manual", slug: "no-ar", publishedUrl } }, links: [canonical], slug: "no-ar" },
+    { payload: { ...dia, canonical: "javascript:void(0)" }, links: [], slug: dia.suggestedSlug },
+  ]) {
+    const article = { payload: caso.payload } as RadarR3Model["article"];
+    const { tela, spy } = await montarTela(undefined, { model: modelo(undefined, { article }) }, true);
+    assert.equal(tela.get("radar-r3-workbench").querySelector('[data-testid="radar-article-foundations-details"]'), null);
+    const fundamentos = tela.get("radar-article-foundations-details");
+    assert.ok(tela.get("radar-r3-profile-mirror").contains(fundamentos));
+    await tela.click(fundamentos.querySelector("summary") as HTMLElement);
+    const enderecos = tela.get("radar-article-dna-addresses");
+    assert.equal(enderecos.querySelector("dd")?.textContent, caso.slug);
+    assert.deepEqual(Array.from(enderecos.querySelectorAll("a"), link => link.getAttribute("href")), caso.links);
+    semOperacao(spy);
+    tela.destroy();
+  }
+});
 
-  /* Os fundamentos do Article: contexto global, read-only. */
+test("GATE 15.2 · O — abrir fundamentos e detalhes não executa workflow", async () => {
+  const { tela, spy } = await montarTela(vista(), {}, true);
+
+  /* Os fundamentos ficam no perfil do artigo, em somente leitura. */
   const fundamentos = tela.get("radar-article-foundations-details");
   await tela.click(fundamentos.querySelector("summary") as HTMLElement);
   assert.match(tela.text(), /Definição do artigo/, "o dado já carregado aparece");

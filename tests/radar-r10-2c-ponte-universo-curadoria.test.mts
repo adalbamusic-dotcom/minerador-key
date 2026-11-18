@@ -68,6 +68,20 @@ const contexto = () => ({
 
 const universo = () => buildRadarCompetitorUniverse({ queries: consultas(), context: contexto() });
 
+test("redirecionamentos da SERP Google preservam resultados distintos e agrupam sessões da mesma página", () => {
+  const first = "https://google.com/goto?url=AbC%2B123&gsessionid=primeira";
+  const repeated = "https://www.google.com/goto?gsessionid=segunda&url=AbC%2B123";
+  const different = "https://google.com/goto?url=abc%2B123&gsessionid=primeira";
+  const queries: RadarExecutedQuery[] = [
+    { queryId: "principal", keyword: "página", role: "principal", results: [resultado(1, first), resultado(2, different)] },
+    { queryId: "auxiliar", keyword: "tema", role: "secundaria", results: [resultado(1, repeated)] },
+  ];
+
+  const universe = buildRadarCompetitorUniverse({ queries, context: contexto() });
+  assert.equal(universe.candidates.length, 2);
+  assert.deepEqual(universe.candidates.find(candidate => candidate.url === first)?.appearedInQueries, ["principal", "auxiliar"]);
+});
+
 /* ------------------------ a SERP canônica do Article --------------------- */
 
 const view = (): RadarSerpView => ({

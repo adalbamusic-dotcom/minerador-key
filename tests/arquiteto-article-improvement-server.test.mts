@@ -209,10 +209,45 @@ test("single acceptance swaps Livre (fora da identidade), preserves published id
   setup(URL_FORA_DA_IDENTIDADE);const run=await prepare(); assert.equal(run.proposals[0].status,"ready",JSON.stringify(run.proposals)); assert.equal(paid,0); assert.equal(articles.length,0);
   const result=await apply(run); assert.equal(result.state,"complete");assert.equal(result.outcomes[0].status,"improved",JSON.stringify(result.outcomes));
   const dna=articles[0].payload;assert.equal(dna.principalKeywordId,newId);assert.deepEqual(dna.secondaryKeywordIds,[oldId]);assert.equal(dna.canonical,url);assert.equal(dna.suggestedSlug,url.split('/').at(-1));assert.equal(dna.territoryRef,territory);assert.equal(rows[1].territoryRef,territory);assert.equal(dna.primaryKeywordMetrics.volumeSearch,50);
+  assert.equal(dna.angle, run.targets[0].theme);
+  assert.deepEqual(new Set(dna.coverage), new Set([run.targets[0].theme, ...rows.map(row => row.keyword)]));
   assert.equal(assessments.find(a=>a.candidateRef===oldId).payload.humanResolution.decidedBy,actorUserId);
   const resume=await apply(result);assert.equal(resume.state,"complete");assert.equal(articles.length,1);assert.equal(paid,0);
   assert.deepEqual(projectImprovementRun(result).beforeAssignments,{});assertReloadGate("published");
 });
+test("publicado legado Livre: o slug real corrige a principal ampla e a cobertura herdada após confirmar", async () => {
+  setup(URL_FORA_DA_IDENTIDADE);
+  const first = await apply(await prepare());
+  assert.equal(first.outcomes[0].status, "improved");
+
+  const prior = articles[0].payload;
+  prior.suggestedSlug = "agencia-de-marketing-para-cosmeticos";
+  prior.coverage = ["cobertura de cosméticos descartada"];
+  prior.requiredTopics = ["captação de pacientes para cosméticos"];
+  rows[0].volume_search = 0;
+  rows[0].volume_source = "google_ads";
+  rows[1].keyword = "captação de pacientes";
+  const goodId = "aaaaaaaa-0000-4000-8000-000000000030";
+  rows.push({
+    ...rows[1], id: goodId, keyword: "captação de pacientes para clínica de estética", volume_search: 20,
+    canonicalWorkflow: { id: `workflow-${goodId}`, lockVersion: 1, payload: {} },
+    keywordDnaRef: { entityId: goodId, versionId: `${goodId}:v1`, contentHash: `sha256:${"c".repeat(64)}` },
+    articleFormationRef: null, articleFormationDecision: null,
+  });
+  const run = await prepare();
+  assert.equal(run.targets[0].slug, "captacao-de-pacientes-para-clinica-de-estetica");
+  assert.equal(run.proposals[0].principalId, goodId, JSON.stringify(run.proposals[0]));
+  assert.equal(run.proposals[0].subjectKeywordId, undefined);
+  const saved = await apply(run);
+  assert.equal(saved.outcomes[0].status, "improved", JSON.stringify(saved.outcomes));
+  const dna = articles.at(-1).payload;
+  assert.equal(dna.principalKeywordId, goodId);
+  assert.equal(dna.canonical, URL_FORA_DA_IDENTIDADE);
+  assert.equal(dna.suggestedSlug, run.targets[0].slug);
+  assert.ok(!dna.coverage.includes("cobertura de cosméticos descartada"));
+  assert.ok(!dna.requiredTopics.includes("captação de pacientes para cosméticos"));
+});
+
 test("stale hash and other actor or brand refuse the saved preview",async()=>{
   setup();const run=await prepare();await assert.rejects(()=>handleArticleImprovement(runtime,{brandId,action:"apply",runId:run.runId,decisionHash:"0".repeat(64)}),/prévia mudou/);
   await assert.rejects(()=>handleArticleImprovement({...runtime,context:{...context,actorUserId:"other"}},{brandId,action:"status",runId:run.runId}),/ator/);

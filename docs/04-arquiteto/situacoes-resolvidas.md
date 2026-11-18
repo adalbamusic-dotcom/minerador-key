@@ -1,3 +1,9 @@
+## Publicados com reforço de outro nicho e versões de Links fora de ordem — 2026-11-18
+
+O cenário de `arquiteto-article-improvement` compara duas candidatas que passam pelo recorte lexical. A de menor volume vence quando há mais títulos orgânicos alinhados na amostra e a prévia mostra a comparação.
+
+**Cenários com fixtures.** `arquiteto-article-improvement` cobre clínica de estética com principal ampla e apoio de cosméticos. A opção com volume para clínicas assume após a revisão do volume zero da página, a página é o Assunto e o apoio contraditório sai. `arquiteto-article-improvement-server` cobre a ação de confirmação no servidor até a releitura do ArticleDNA, inclusive um legado com slug sugerido e cobertura errados. `arquiteto-radar-handoff-context` monta a lista fora de ordem e verifica o uso do último aprovado, inclusive o caso em que sua base é incompatível. Validação real pendente.
+
 ## Leitura integral de eventos editoriais — 2026-11-16
 
 **Correção local com fixtures:** eventos de rejeição após o limite de uma página não são mais omitidos da leitura da mesa ou do delta; contagem ausente, divergente ou página repetida gera erro em vez de adotar um estado parcial. Cenário `arquiteto-eventos-paginacao`; validação pelo acionador pendente e exclusão física separada.
@@ -616,3 +622,6 @@ o Silo também recusam listas fora da ordem. Cenários:
 `arquiteto-silo-composicao-planejada`, `arquiteto-silo-plano-binding` e
 `arquiteto-silo-working-copy-record`. Isso ainda não conecta o botão, não
 revalida sob lock nem habilita o writer; o fluxo real permanece em aberto.
+## Progresso da coleta no processamento de artigos — 2026-11-16
+
+**Correção local; validação real pendente:** a coleta em blocos atualizava o estado de progresso, mas a área de atividade dependia de outra trava e não o mostrava. O painel existente agora exibe esse estado mesmo com um bloco; durante outras fases da formação, indica processamento sem alegar avanço não medido. A execução anterior perdeu a sessão antes da confirmação de resultado e não foi repetida automaticamente. Cenário: `arquiteto-linha-de-processo-guarda`.

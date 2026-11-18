@@ -65,7 +65,7 @@ test("artigo sem território e sem siloId não tem pai a resolver", () => {
 
 const grafo = (overrides: Record<string, unknown> = {}) => ({
   graphId: "arquiteto:internal-links:working-silo:3", graphVersionId: "graph-v1", contentHash: "sha256:graph",
-  siloId: "working-silo:3", workflowStatus: "approved",
+  siloId: "working-silo:3", workflowStatus: "approved", versionNumber: 1,
   baseSiloDnaVersionRef: { versionId: "silo-v1" }, baseSiloPageVersionRef: { versionId: "page-v1" },
   nodes: [
     { nodeId: "silo-page:working-silo:3", nodeType: "SILO_PAGE", articleDnaVersionRef: null },
@@ -93,6 +93,15 @@ test("grafo proposto, de outro Silo ou de outra versão não é aceito", () => {
   assert.equal(findApprovedGraphForSilo({ silo: contexto, graphs: [grafo({ siloId: "working-silo:9" })] }), null);
   // Base de outra versão descreveria uma arquitetura que não é a entregue.
   assert.equal(findApprovedGraphForSilo({ silo: contexto, graphs: [grafo({ baseSiloDnaVersionRef: { versionId: "silo-v0" } })] }), null);
+});
+
+test("o envio usa uma só versão de links e descarta aprovadas superadas mesmo fora de ordem", () => {
+  const antiga = grafo();
+  const vigente = grafo({ graphVersionId: "graph-v2", versionNumber: 2 });
+  const rascunho = grafo({ graphVersionId: "graph-v3", versionNumber: 3, workflowStatus: "proposed" });
+  assert.equal(findApprovedGraphForSilo({ silo: contexto, graphs: [antiga, rascunho, vigente] })?.graphVersionId, "graph-v2");
+  const deNovaComposicao = grafo({ graphVersionId: "graph-v4", versionNumber: 4, baseSiloDnaVersionRef: { versionId: "silo-v4" } });
+  assert.equal(findApprovedGraphForSilo({ silo: contexto, graphs: [antiga, deNovaComposicao, vigente] }), null);
 });
 
 test("cada Article recebe só as relações que o envolvem, com direção e âncoras", () => {

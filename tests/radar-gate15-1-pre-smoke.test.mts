@@ -217,7 +217,8 @@ test("GATE 15.1 · E, F e G — trocar de área, abrir fundamentos e recarregar 
   assert.doesNotMatch(workbench, /onToggle=\{\(\) => \{[^}]*on(Start|Analyze|Finalize|Reset)/);
 
   /* Abrir fundamentos é um <details>: sem handler, sem provider. */
-  const faixa = workbench.slice(workbench.indexOf("function ArticleContextBand"), workbench.indexOf("O RELATÓRIO RESPONDE PERGUNTAS"));
+  const perfil = readFileSync(new URL("../modules/radar/radar-r3-profile-mirror.tsx", import.meta.url), "utf8");
+  const faixa = perfil.match(/<details[^>]*data-testid="radar-article-foundations-details"[\s\S]*?<\/details>/)?.[0] ?? "";
   assert.match(faixa, /<details/);
   assert.doesNotMatch(faixa, /onClick|onChange|fetch\(/);
 
@@ -615,7 +616,7 @@ test("GATE 15.1 · a primeira camada renderiza as quatro áreas e a faixa do Art
   for (const area of ["pesquisa", "videos", "especialista", "relatorio"]) {
     assert.match(markup, new RegExp(`data-testid="radar-r3-card-${area}"`), area);
   }
-  assert.match(markup, /data-testid="radar-article-context-band"/);
+  assert.doesNotMatch(markup, /radar-article-context-band|radar-article-foundations-details/);
   assert.match(markup, /skincare para pele oleosa/);
 
   /*

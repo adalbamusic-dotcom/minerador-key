@@ -112,15 +112,15 @@ const fonteSemComentarios = (caminho: string) => readFileSync(new URL(caminho, i
   .replace(/\/\*[\s\S]*?\*\//g, " ")
   .replace(/^\s*\/\/[^\n]*/gm, " ");
 
-test("05 · Radar: linha da planilha, perfil, cabeçalho do foco, página do artigo e importação usam o Assunto do ArticleDNA", () => {
+test("05 · Radar: linha da planilha, perfil, página do artigo e importação usam o Assunto do ArticleDNA", () => {
   const pagina = fonteSemComentarios("../modules/radar/radar-page.tsx");
   const coluna = pagina.slice(pagina.indexOf('{ id: "article", header: "Artigo"'), pagina.indexOf('{ id: "article", header: "Artigo"') + 900);
   assert.match(coluna, /<ArticleSubjectLine phrase=\{articleSubjectPhraseOf\(data\.article\?\.payload\)\} className="mb-1"\/><div className="flex min-w-0 items-center gap-2"><strong/, "o Assunto abre a célula, antes do título");
   assert.match(pagina, /<ImportPanel title="Importar artigos aprovados"[^\n]*subjectOf=\{version => articleSubjectPhraseOf\(version\.payload\)\}/);
   const perfil = fonteSemComentarios("../modules/radar/radar-r3-profile-mirror.tsx");
-  assert.match(perfil, /\{model\.title\}<\/h2><ArticleSubjectLine phrase=\{model\.researchContext\?\.article\.subject\?\.phrase\} showEmpty=\{Boolean\(model\.researchContext\)\}/);
+  assert.match(perfil, /\{model\.title\}<\/h2>\s*<ArticleSubjectLine phrase=\{model\.researchContext\?\.article\.subject\?\.phrase\}/);
   const foco = fonteSemComentarios("../modules/radar/radar-r3-workbench.tsx");
-  assert.match(foco, /\{model\.title\}<\/h1>\s*<ArticleSubjectLine phrase=\{model\.researchContext\?\.article\.subject\?\.phrase\}/);
+  assert.doesNotMatch(foco, /<ArticleSubjectLine/);
   const artigo = fonteSemComentarios("../modules/radar/radar-analysis-page.tsx");
   assert.match(artigo, /\{identity\.title\}<\/h1>\s*<ArticleSubjectLine phrase=\{articleSubjectPhraseOf\(article\.payload\)\} className="mt-2"\/>/);
   const compartilhado = fonteSemComentarios("../components/editorial/operational-screen-shared.tsx");

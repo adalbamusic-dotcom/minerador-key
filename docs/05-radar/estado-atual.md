@@ -1,5 +1,51 @@
 # Estado atual — Radar
 
+## Materiais para download — 2026-11-18
+
+Adendo implementado no export de escrita e no material compartilhado pelo Redator. O campo aditivo `downloadDeliverables` vem da coluna `estrutura` e aparece no painel de fundamentos quando há instruções aplicáveis. Arquivo e link ficam sob responsabilidade de quem escreve. Validação automatizada com fixtures de PDF, planilha e imagens do Drive. Validação no navegador com um artigo real pendente.
+
+## Layout compacto do Especialista — 2026-11-17
+
+O formulário abre com três linhas e pode ser redimensionado na vertical. O cabeçalho reúne estado, contadores e Atualizar. Sem pontos, a revisão dos pareceres aparece ao lado do formulário em telas largas, e o estado vazio da revisão ocupa uma linha. A lista com respostas originais, as ferramentas avançadas e a proveniência ficam recolhidas. As decisões e os controles de edição continuam no cartão do parecer em Resultado da revisão.
+
+**Validado no Radar local:** “instagram não traz pacientes” mostrou formulário e revisão com um parecer na mesma linha, com 518 px de altura para o painel nas larguras de 1440 e 1920 px. O conteúdo do painel coube horizontalmente a 360, 768, 1024 e 1440 px. “agência de marketing para cosméticos” mostrou os estados vazios compactos. A checagem visual global continua apontando falhas no Arquiteto e no Redator.
+
+**Regressão:** `npm run test:regressao` verde, com 3.767 testes do Radar. Lint direcionado e `git diff --check` passaram.
+
+## Parecer no assunto principal — 2026-11-17
+
+“Incluir no assunto principal” usa a revisão remota existente de Respostas recebidas. A revisão preserva a decisão na pauta e a vincula à mesma marca, artigo e versão. A camada do especialista mantém o original para o corpo do artigo, inclusive no parecer avulso, sem contar este último como ponto de revisão atendido. A próxima organização do artigo-modelo relaciona o parecer às perguntas e evidências da SERP. O CSV “Para escrever” identifica o texto em `fontes_e_especialista` e a sua aplicação em `estrutura`, inclusive quando a planta foi organizada antes da decisão.
+
+**Verificação:** o teste DOM cobre o clique, a rota e a confirmação com fixtures. O teste de exportação percorre revisão, releitura, parecer avulso, pedido do artigo-modelo e colunas do CSV. Lint direcionado passou. As linhas consultadas no Radar local não tinham respostas registradas, por isso o clique foi verificado com fixture. A checagem visual global ainda aponta pendências no Arquiteto e no Redator.
+
+**Regressão:** `npm run test:regressao` terminou verde, com 3.767 testes do Radar.
+
+## Fundamentos na linha expandida — 2026-11-17
+
+O painel da linha passa a reunir “Ver fundamentos do Article” e “Investigação”. Os fundamentos incluem o slug, os links, as keywords, o contexto do Silo e a proveniência já disponíveis. O resumo da investigação mantém o estado e a contagem da SERP visíveis. Ao expandi-lo, aparecem os detalhes de SERP, conteúdo, Amazon, especialista e relatório em uma grade compacta.
+
+No topo, o título identifica o artigo em foco e os cartões abrem os controles e resultados da investigação. O Assunto, as keywords e os demais campos do ArticleDNA foram retirados dessa faixa. No relatório do topo, a comparação permanece como resultado da pesquisa, e a intenção declarada pode ser consultada na linha. A regra anterior de apresentar os fundamentos no topo fica substituída pela linha expansível.
+
+**Validado no Radar local:** a linha do artigo “marketing para clínica de estética” exibiu o slug, a URL publicada e o canonical. A seção recolhida mediu 191 px na janela verificada. Em 360, 768, 1024 e 1440 px, o painel manteve os endereços dentro da sua largura. Abrir Pesquisa no topo conservou os controles com os fundamentos concentrados na linha. Lint direcionado e `git diff --check` passaram. A checagem visual global continua apontando pendências fora do Radar, no Arquiteto e no Redator.
+
+**Regressão:** `npm run test:regressao` verde, com 3.766 testes do Radar. O teste da planilha verifica que os fundamentos seguem a linha expandida mesmo quando outro artigo está em foco.
+
+## Endereços na definição do artigo — 2026-11-17
+
+O painel “Ver fundamentos do Article” lê o slug e os endereços do ArticleDNA que a tela já recebeu. Publicados com identidade de origem KeywordDNA mostram a URL publicada e o canonical como links. Artigos novos mostram o slug e somente o canonical quando existe. A leitura mantém a grafia dos endereços e usa a proteção do slug publicado. Sem endereço recebido, o painel informa a ausência.
+
+**Verificado no Radar local:** os três publicados recentemente revisados da AdalbaPro mostram seus slugs e URLs preservados. O painel com URL longa manteve a largura em 360, 768, 1024 e 1440 px no tema escuro. O teste DOM cobre publicado do Minerador, novo, origem manual e protocolo não navegável. Lint dos arquivos de produção alterados e teste da ajuda passaram. A verificação visual global ainda aponta falhas em arquivos do Arquiteto e do Redator, fora desta alteração.
+
+**Regressão:** `npm run test:regressao` verde, incluindo 3.765 testes do Radar.
+
+## Referências orgânicas com redirecionamento Google — 2026-11-17
+
+**Verificado no navegador local:** no checklist de marketing para clínica de estética da AdalbaPro, a SERP gravada tinha dez resultados, mas o Radar mostrava uma referência. A chave descartava o parâmetro que identifica o destino em `google.com/goto`. Depois da correção, o botão “Refazer Pesquisa Google” reaproveitou a coleta e confirmou as dez referências selecionadas para análise.
+
+A chave compartilhada alimenta a curadoria, as leituras competitivas e o CSV. O cenário em `radar-r10-2c-ponte-universo-curadoria.test.mts` cobre dois destinos distintos e a repetição de um deles em outra sessão.
+
+**Reteste em localhost:** a planilha manteve o status `Finalizado` após recarregar para “plano de marketing estética: exemplos e templates” (9 de 10 páginas analisadas) e “marketing para clínica de estética” (16 de 20). A coleta gravada desse segundo artigo continha 10 resultados da principal e 10 da secundária “marketing orgânico”. “Refazer Pesquisa Google” remontou a curadoria com as 20 referências e “Analisar concorrência” fechou a investigação. O Minerador mostrava ambas as principais aprovadas e com volume registrado (10 e 90, respectivamente). A validação aproveitou as formações recebidas pelo Radar; não repetiu a gravação das etapas anteriores. A bateria `npm run test:regressao` terminou verde, com 3.764 testes do Radar e as demais suítes dentro dos tetos conhecidos.
+
 ## Estado da pesquisa Google durante consultas auxiliares — 2026-11-16
 
 **Reproduzido na AdalbaPro:** durante as consultas auxiliares, a trava da pesquisa continuava ativa, mas o botão voltava a ficar disponível porque o estado visual acompanhava apenas a coleta canônica. Outro clique era recusado, parecendo não responder. A mensagem também atribuía a operação ao artigo selecionado mesmo quando outra ação ocupava o Radar.
@@ -465,6 +511,8 @@ SQL, sem escrita remota fora das rotas que o botão do artigo já usa, sem chama
 ## Assunto legível em todo painel do Radar — 2026-10-13
 
 Pedido do dono (2026-10-13): "coloca sempre o assunto no painel para que seja legível". Só a keyword principal não identificava o artigo.
+
+**Atualização de 2026-11-17:** a exibição do Assunto no cabeçalho do Workbench foi substituída pela apresentação na linha da planilha e no painel expandido.
 
 **Verificado no código e confirmado por teste. Validado manualmente: não (homologação é do dono).** Sem migration, sem escrita remota, sem SQL, sem chamada paga.
 

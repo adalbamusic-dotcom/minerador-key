@@ -30,12 +30,19 @@ import type { RadarEntityReading } from "./semantic-concept-model.ts";
  *
  * Mesma regra que o Arquiteto usa para comparar SERPs em
  * `candidate-serp-boundary.ts`: protocolo, `www.`, query, fragmento e barra
- * final não distinguem página. O CAMINHO distingue — `/artigo-a` e `/artigo-b`
- * continuam duas referências.
+ * final não distinguem páginas comuns. Em `google.com/goto`, o parâmetro
+ * `url` identifica o destino e precisa fazer parte da chave.
  */
 export function radarNormalizedUrl(value: string): string {
-  return value
-    .trim()
+  const trimmed = value.trim();
+  // Google SERP redirect URLs share a path. The case-sensitive destination
+  // token identifies the result, while the session ID varies across queries.
+  const googleRedirect = /^(?:https?:\/\/)?(?:www\.)?google\.com\/goto\?([^#]*)/i.exec(trimmed);
+  if (googleRedirect) {
+    const destination = new URLSearchParams(googleRedirect[1]).get("url");
+    if (destination) return `google.com/goto?url=${encodeURIComponent(destination)}`;
+  }
+  return trimmed
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/^www\./, "")

@@ -43,6 +43,26 @@ function urlOrNull(value: string | null | undefined) {
   try { return new URL(value).toString(); } catch { return null; }
 }
 
+function articleWebLink(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function radarArticleDnaAddresses(article: Pick<ArticleDNA, "suggestedSlug" | "canonical" | "publishedIdentityRef">) {
+  const identity = article.publishedIdentityRef;
+  return {
+    published: Boolean(identity),
+    slug: identity?.slug || article.suggestedSlug,
+    publishedUrl: identity?.source === "keyword_dna" ? articleWebLink(identity.publishedUrl) : null,
+    canonical: articleWebLink(identity?.canonical ?? article.canonical),
+  };
+}
+
 export function resolveRadarPublication(input: {
   legacy?: PublicationRecord | null;
   operational?: OperationalPublication | null;
