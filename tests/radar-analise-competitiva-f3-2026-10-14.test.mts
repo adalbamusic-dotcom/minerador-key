@@ -415,7 +415,7 @@ test("F3 · caso real · ANTES (planta gravada, regras 2026-10-11c): a coluna co
   assert.match(linha.serp_resumida, /^Amostra relevante \(D11\): 5 de 9 páginas comparáveis \(fora, marcadas e não escondidas: psitto\.com\.br \(fora do leitor\)/m);
   assert.match(linha.estrutura, /^Faixa de referência \(amostra relevante, 5 páginas, sem outlier\): 1900–2100 palavras, 8–9 H2; não é meta \(D12\)\.$/m);
   assert.match(linha.estrutura, /^CTA: Vamos planejar a presença orgânica da sua clínica no Google\?$/m);
-  assert.match(linha.estrutura, /^- Fechamento em 4 tempos: dor/m);
+  assert.match(linha.estrutura, /^- Fechamento: retome o problema do leitor/m);
   assert.doesNotMatch(linha.estrutura, /^Diferencial da marca/m, "brandEdge só organizando de novo");
   assert.deepEqual(Object.keys(linha), [...RADAR_WRITING_EXPORT_COLUMNS], "as 13 colunas, na mesma ordem");
 });
@@ -436,7 +436,8 @@ test("F3 · caso real · DEPOIS (planta nova, regras 2026-10-14b): os quatro blo
   assert.doesNotMatch(linha.cobrir_e_superar, /Como fazer captação de pacientes em odontologia\? →|Pedir à marca|PREPARED|acima das 4/);
   /* promessa_e_leitor: o ângulo de diferenciação e o contraste com o genérico. */
   assert.match(linha.promessa_e_leitor, /^Ângulo de diferenciação \(análise competitiva; a entrega que a amostra relevante não tem\): O checklist do que o consultório/m);
-  assert.match(linha.promessa_e_leitor, /^Contra o genérico: A agência de posts entrega calendário/m);
+  assert.doesNotMatch(linha.promessa_e_leitor, /^Contra o genérico:/m);
+  assert.match(linha.estrutura, /^- Diferenciação: descreva a entrega concreta da marca/m);
   /* estrutura: o diferencial da marca e o fechamento em 4 tempos, com o diagnóstico como CTA único. */
   const estrutura = linhas(linha.estrutura);
   assert.ok(estrutura.includes("Diferencial da marca (regras 2026-10-14b; a entrega primeiro, o nome do método depois, uma vez):"));

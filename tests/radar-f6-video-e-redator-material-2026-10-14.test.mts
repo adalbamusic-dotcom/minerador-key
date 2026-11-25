@@ -116,12 +116,12 @@ test("F6 · material · caso real: os blocos saem da MESMA linha do CSV 'Para es
   assert.deepEqual(material.competitive, linhas(artigo.row.cobrir_e_superar).filter(Boolean));
   assert.ok(radarWritingMaterialCompetitiveBlock(material, 3).some(item => item.startsWith("O que o CRO não permite postar?")));
   assert.ok(radarWritingMaterialCompetitiveBlock(material, 4).some(item => item.startsWith("listicle \"N dicas\"")));
-  /* O fechamento: a planta gravada (sem os 4 campos) leva a virada, a linha dos 4 tempos e o CTA aprovado. */
-  assert.ok(material.closing.some(item => item.startsWith("- Fechamento em 4 tempos: dor")));
+  /* A planta gravada leva a virada, a orientação de fechamento e o CTA aprovado. */
+  assert.ok(material.closing.some(item => item.startsWith("- Fechamento: retome o problema do leitor")));
   assert.equal(radarWritingMaterialClosingOf(material)?.cta, "Vamos planejar a presença orgânica da sua clínica no Google?");
   /* Título e keyword: as regras K1–K9, sem os textos da planta (que estão no articleBlueprint). */
-  assert.ok(material.titleAndKeyword.some(item => item.startsWith("Título pela SERP (regras de keyword 2026-10-14")));
-  assert.ok(material.titleAndKeyword.some(item => item.startsWith("- Keyword no corpo (K7)")));
+  assert.ok(material.titleAndKeyword.some(item => item.startsWith("Título pela SERP: H1, título SEO e meta")));
+  assert.ok(material.titleAndKeyword.some(item => item.startsWith("- Abertura: responda à intenção")));
   assert.equal(material.titleAndKeyword.some(item => /^(?:H1|SEO title|Meta description):/.test(item)), false);
   /* A linha de antes do teto não vai ao CSV nem ao JSON do artigo (os snapshots continuam byte a byte). */
   assert.equal(JSON.stringify(artigo).includes("uncutRow"), false);

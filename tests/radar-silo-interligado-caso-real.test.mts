@@ -106,43 +106,36 @@ test("F1 · planta gravada · título, alternativas, SEO title e meta saem sem m
   assert.equal(JSON.stringify(gravada), antes, "o payload gravado não muda (nem o hash)");
 });
 
-test("F1 · planta gravada · a coluna de título diz a regra nova, a forma natural, as 3 opções que abrem pela keyword e os ângulos", () => {
-  const titulo = linhasDe(linhaDoCaso().titulo_e_seo);
-  assert.equal(titulo[4], "Keyword principal (K2, K5–K7): uma vez no H1 e uma vez no SEO title, na forma natural, em qualquer posição; no primeiro parágrafo, ela ou uma variação próxima nas primeiras ~100 palavras; em no máximo 1 H2, nunca no começo; no corpo, até 8 vezes; o resto em variações (estrutura, \"Keyword no corpo\").");
-  assert.match(titulo[5], /^Título pela SERP \(regras de keyword 2026-10-14, diretriz de comunicação humana 2026-10-11\): 3 opções \(o H1 e as alternativas acima\); a keyword principal, na forma natural, aparece uma vez em cada uma, em qualquer posição, e abre no máximo 1 delas; cada opção tem um ângulo \(dor → saída; contraste com o que o topo da SERP promete/);
-  assert.equal(titulo[6], "Forma natural da principal (K1): escreva \"captação de pacientes dentista\" em português correto (com a preposição e a flexão que a frase pede), uma vez no H1 e uma vez no SEO title; em título e H2, nunca a forma truncada.");
-  assert.ok(titulo.includes("- Ajuste das opções: a keyword principal abre 3 das 3 opções; só 1 pode abrir por ela: nas outras, o gancho vem primeiro e a principal entra depois, natural."));
-  assert.ok(titulo.some(item => item.startsWith("- Ajuste das opções: as 3 opções começam igual ou dizem o mesmo; dê a cada opção um ângulo: (a) dor → saída;")));
-  assert.match(titulo[titulo.length - 1], /^Meta description pela SERP \(K4\): natural, com dor ou contraste/);
-  for (const linha of titulo) {
-    assert.doesNotMatch(linha, /comece pela keyword|keyword principal no começo|nos primeiros 60 caracteres;/, linha);
-  }
+test("Planta gravada fornece título orientado pela intenção e pela SERP", () => {
+  const titulo = linhaDoCaso().titulo_e_seo;
+  assert.match(titulo, /^Termo principal: mantenha o sentido da busca/m);
+  assert.match(titulo, /^Título pela SERP: H1, título SEO e meta devem identificar a entidade central/m);
+  assert.match(titulo, /^Forma natural da principal: "captação de pacientes dentista"/m);
+  assert.match(titulo, /^Gancho pela SERP:/m);
+  assert.match(titulo, /^Meta description: resuma o que o leitor conseguirá/m);
+  assert.doesNotMatch(titulo, /uma vez no H1|nos primeiros 60 caracteres|no corpo, até/);
 });
 
 test("F1 · planta gravada com a forma natural gravada · a coluna diz a natural e manda trocar a forma crua no título e no H2", () => {
   const gravada = plantaDoCasoReal({ title: { ...plantaDoCasoReal().blueprint.title, principalNatural: PRINCIPAL_NATURAL_DO_CASO } });
   const linha = linhaDoCaso({ blueprint: gravada });
   const titulo = linhasDe(linha.titulo_e_seo);
-  assert.ok(titulo.includes(`Forma natural da principal (K1): "${PRINCIPAL_NATURAL_DO_CASO}"; a forma crua "${PRINCIPAL_DO_CASO}" não aparece em título nem em H2.`));
+  assert.ok(titulo.includes(`Forma natural da principal: "${PRINCIPAL_NATURAL_DO_CASO}". Ajuste preposições e flexões para escrever com clareza.`));
   assert.ok(titulo.includes(`- Ajuste do H1: troque a forma crua "${PRINCIPAL_DO_CASO}" pela natural "${PRINCIPAL_NATURAL_DO_CASO}".`));
-  assert.match(linha.estrutura, new RegExp(`^- Abertura \\(K5\\): o primeiro parágrafo responde à busca com "${PRINCIPAL_NATURAL_DO_CASO}" ou uma variação próxima nas primeiras ~100 palavras`, "m"));
+  assert.ok(linha.estrutura.includes(`- Abertura: responda à intenção de "${PRINCIPAL_NATURAL_DO_CASO}"`));
 });
 
-test("F1 · planta gravada · a estrutura diz os 2 H2 que abrem pela keyword, a abertura (K5), o teto (K7) e as complementares dentro da seção", () => {
-  const estrutura = linhasDe(linhaDoCaso().estrutura);
-  assert.ok(estrutura.includes("- H2 (K6): abre pela keyword \"captação de pacientes dentista\"; escreva este H2 pelo subtema ou pela pergunta da seção (\"O que é tráfego orgânico na captação de pacientes\"), com a keyword dentro da seção, não no começo do título."));
-  assert.ok(estrutura.includes("- H2 (K6): abre pela keyword \"tráfego orgânico como fazer\"; escreva este H2 pelo subtema ou pela pergunta da seção (\"Como começar o tráfego orgânico sem equipe grande\"), com a keyword dentro da seção, não no começo do título."));
-  assert.equal(estrutura.filter(item => item.startsWith("- H2 (K6):")).length, 2, "só os 2 H2 do registro");
-  assert.ok(estrutura.some(item => item.startsWith("- H2 sem keyword no começo (K6): 2 H2 abrem pela keyword (")));
-  assert.ok(estrutura.some(item => item.startsWith("- Abertura (K5): o primeiro parágrafo responde à busca com \"captação de pacientes dentista\" (na forma natural) ou uma variação próxima nas primeiras ~100 palavras")));
-  assert.ok(estrutura.some(item => item.startsWith("- Keyword no corpo (K7): \"captação de pacientes dentista\" até 8 vezes no texto (2 + palavras/600, sobre até 4058 palavras do plano); o resto em variações: ")));
-  assert.ok(estrutura.includes("- tráfego orgânico como fazer → dentro da seção 2 (Responde o passo a passo que a busca mostra.)"));
-  assert.equal(estrutura.some(item => /^- Primeira frase do corpo|^- Primeiro H2:/.test(item)), false, "as linhas da regra antiga saíram");
+test("Planta gravada direciona as complementares para o corpo, no contexto da seção", () => {
+  const estrutura = linhaDoCaso().estrutura;
+  assert.match(estrutura, /^- Abertura: responda à intenção de "captação de pacientes dentista"/m);
+  assert.match(estrutura, /^- Cobertura semântica: tráfego orgânico como fazer → seção /m);
+  assert.match(estrutura, /^- Título final da seção "Tráfego orgânico como fazer/im);
+  assert.doesNotMatch(estrutura, /palavras\/600|nenhum H2 abre pela|nas primeiras ~100 palavras/);
 });
 
 test("F1 · planta gravada · o prompt da linha e os links do F1 (os 5 de antes; a malha é a F2)", () => {
   const linha = linhaDoCaso();
-  assert.match(linha.prompt, /keyword principal natural, 1× no H1 e no SEO title, sem repetir; nenhum H2 abre por ela;/);
+  assert.match(linha.prompt, /Responda à intenção da principal desde a abertura/);
   assert.doesNotMatch(linha.prompt, /no começo do H1, na primeira frase, no primeiro H2/);
   assert.equal((linha.links_internos.match(/^L\d+ · /gm) || []).length, 5, "F1 não mexe nos links");
   assert.match(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" })!, /^Esta versão foi montada com as regras de 2026-10-11c\. As de 2026-10-14 acrescentam as regras de keyword e título 2026-10-14/);

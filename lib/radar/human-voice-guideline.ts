@@ -348,8 +348,7 @@ export function radarHumanVoicePromptBlock(): string[] {
 
 /** A regra geral da linha "Silo"/"Marca" do CSV "Para escrever" (uma regra numerada). */
 export function radarHumanVoiceWritingRule(): string {
-  /* 2026-10-14b · F3 · as ressalvas uma vez, na mesma regra geral 12 (o fechamento D7 vai à estrutura de cada artigo, com a fala do especialista). */
-  return `${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_SERP_SUMMARY} ${RADAR_HUMAN_VOICE_RESERVATION_RULE} ${RADAR_HUMAN_VOICE_PRECEDENCE} A definição completa, com exemplos bons e ruins, está em docs/compartilhado/diretriz-de-comunicacao-humana.md.`;
+  return `Comunicação humana guiada pela SERP: comece com uma situação que o leitor reconheça e avance para uma explicação útil, na voz da marca. SEO semântico: use a principal para orientar a resposta, as complementares para desenvolver facetas úteis e os reforços para esclarecer o contexto. A SERP informa as perguntas, as entidades e a cobertura. O volume ajuda a priorizar buscas com intenção compatível e fica fora do texto publicável. Os títulos identificam o que cada seção entrega. Escreva com variações naturais e avance a explicação a cada seção. ${RADAR_HUMAN_VOICE_RESERVATION_RULE} ${RADAR_HUMAN_VOICE_PRECEDENCE}`;
 }
 
 /** A frase da linha "Voz da marca": a precedência entre a Skill e a diretriz. */

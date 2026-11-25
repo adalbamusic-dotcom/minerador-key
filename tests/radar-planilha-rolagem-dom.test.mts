@@ -50,6 +50,26 @@ function espiarGravacoes() {
 
 const planilha = () => React.createElement(OperationalDataGrid<Linha>, { module: "radar", userId: "dono", brandId: "marca-1", rows: LINHAS, columns: COLUNAS });
 
+test("O cabeçalho Silo ordena de A a Z e de Z a A antes de paginar", async () => {
+  const tela = await montarRadar();
+  const rows = LINHAS.map((linha, index) => ({ ...linha, silo: index === 26 || index === 28 ? "Árvore" : "Zebra" }));
+  const columns = [...COLUNAS, { id: "silo", header: "Silo", sortable: true, value: (row: (typeof rows)[number]) => row.silo }];
+  try {
+    await tela.render(React.createElement(OperationalDataGrid<(typeof rows)[number]>, { module: "radar", userId: "dono", brandId: "ordenacao", rows, columns }));
+    const header = [...tela.container.querySelectorAll<HTMLButtonElement>("thead button")].find(button => button.textContent === "Silo")!;
+    const firstNames = () => [...tela.container.querySelectorAll("tbody tr td:nth-child(4)")].slice(0, 3).map(cell => cell.textContent);
+    assert.deepEqual(firstNames(), ["Linha 0", "Linha 1", "Linha 2"]);
+    await tela.click(header);
+    assert.equal(header.textContent, "Silo ↑");
+    assert.deepEqual(firstNames(), ["Linha 26", "Linha 28", "Linha 0"]);
+    await tela.click(header);
+    assert.equal(header.textContent, "Silo ↓");
+    assert.deepEqual(firstNames(), ["Linha 0", "Linha 1", "Linha 2"]);
+  } finally {
+    tela.destroy();
+  }
+});
+
 test("60 eventos de rolagem seguidos gravam a posição uma vez — a última", async () => {
   const tela = await montarRadar();
   const espiao = espiarGravacoes();

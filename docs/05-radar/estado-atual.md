@@ -1,5 +1,15 @@
 # Estado atual — Radar
 
+## Exportação com cobertura semântica — 2026-11-25
+
+O mesmo botão Exportar → Para escrever gera orientação por seção usando o ArticleDNA transportado e a planta aprovada, tanto para novos quanto para publicados. O volume da principal usa a mesma medição dos demais termos e fica na coluna artigo como referência editorial. A estrutura resolve destinos e explicita termos transversais quando a planta não demonstra encaixe. O material de escrita lê as orientações da mesma projeção. Nenhuma gravação ou chamada de provider é necessária para reaplicar essa leitura a uma planta aprovada.
+
+**Verificação local:** 3.770 testes do Radar passaram, incluindo exportação de novos e publicados, volume conhecido e ausente, projeção da escrita para MCP e preservação do Assunto. TypeScript, catálogo, ajuda e lint direcionado também passaram. Verificação pelo botão em uma marca real pendente.
+
+## Ordenação por silo — 2026-11-25
+
+A coluna “Silo” substitui “Formato” na planilha e usa a mesma ordenação de cabeçalho de “Artigo”. O filtro “Formato” continua na barra e usa a chave da vista salva existente. O teste DOM cobre as duas direções de ordenação antes da paginação.
+
 ## Materiais para download — 2026-11-18
 
 Adendo implementado no export de escrita e no material compartilhado pelo Redator. O campo aditivo `downloadDeliverables` vem da coluna `estrutura` e aparece no painel de fundamentos quando há instruções aplicáveis. Arquivo e link ficam sob responsabilidade de quem escreve. Validação automatizada com fixtures de PDF, planilha e imagens do Drive. Validação no navegador com um artigo real pendente.
@@ -1592,7 +1602,7 @@ do Arquiteto. Na falta dele, a foto do envio (`hydration.silo.articleRole`). Por
    "a9" ela não via o vazamento.
 5. **"Formato editorial: Suporte." (COB-1).** O motivo do modo de análise (aba Resumo da página de análise e o
    `modeRecommendation` gravado em cada versão de análise nova) usava `ArticleDNA.hierarchy`/`row.format`. Agora usa
-   `radarUnitFormatLabel` (Artigo ou SiloPage), a mesma régua da coluna Formato. Versões já gravadas ficam como estão.
+   `radarUnitFormatLabel` (Artigo ou SiloPage), a mesma régua do filtro Formato. Versões já gravadas ficam como estão.
 6. **Foto "support" sem confirmação (F5, nit).** O envio grava "support" também para Silo sem Pilar. Sem o SiloDNA
    vigente em mãos, o "Suporte" da foto deixa de ser decisão: a linha Função fica "pendente" e diz "confirme no
    Arquiteto". O rótulo não muda. O KGR é binário e continua usando a foto acima da sugestão da formação.

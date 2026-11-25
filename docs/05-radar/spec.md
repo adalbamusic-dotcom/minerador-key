@@ -1,5 +1,17 @@
 # Spec — Radar
 
+## Cobertura semântica no CSV Para escrever — 2026-11-25
+
+A principal do ArticleDNA transportado orienta a intenção e a resposta desde a abertura. As complementares e os reforços aprovados aparecem no corpo da seção pertinente, com a pergunta, a entidade e as evidências da planta. A leitura usa o destino gravado quando ele identifica uma seção existente e procura o termo nas perguntas, subtítulos e entidades quando o destino está ausente. Sem seção inequívoca, o termo fica como cobertura transversal condicionada ao assunto. Volume só entra como referência editorial da medição disponível. Volume ausente é informado sem inferência de zero, de troca de keyword ou de ganho.
+
+Para novos, a redação desenvolve a entrega prática ou o critério de decisão que a amostra deixou em aberto. Para publicados, ela conserva a identidade e usa o mapa de atualização para preservar o que já é útil e explicitar a melhoria. A cobertura respeita o papel de cada artigo no silo e a contribuição aprovada do especialista.
+
+**Substituído em 2026-11-25 no entregável Para escrever:** as cotas de repetição e de posição de K2, K5, K6 e K7 deram lugar a títulos com entidade e utilidade claras, abertura pela intenção e variações apoiadas na SERP. A projeção é compartilhada com o MCP e o material de escrita. Não exige reorganizar plantas aprovadas.
+
+## Ordenação por silo
+
+Desde 2026-11-25, a coluna “Silo” ocupa o lugar de “Formato” e substitui a opção “Por silo” da barra. O cabeçalho ordena pelo nome exibido, de A a Z ou de Z a A, antes da paginação. O filtro “Formato” da barra continua disponível para distinguir Artigo e SiloPage.
+
 ## Materiais para download no entregável — 2026-11-18
 
 O CSV “Para escrever” projeta, na coluna `estrutura`, um adendo quando o Assunto ou as keywords do artigo pedem explicitamente um recurso baixável, como PDF, planilha, documento editável, apresentação ou imagens do Drive. O prompt aponta para o adendo, e o material do Redator o lê da mesma linha. As palavras dos concorrentes e as buscas relacionadas da SERP não abrem tarefas. Formatos repetidos geram uma única tarefa.

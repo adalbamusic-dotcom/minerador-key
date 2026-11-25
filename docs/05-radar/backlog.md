@@ -1,5 +1,9 @@
 # Backlog — Radar
 
+- [x] Refinar o CSV Para escrever com intenção, cobertura por seção, volume editorial e ganho concreto para novos e publicados, com testes sem chamadas pagas.
+
+- [x] Trocar a coluna Formato por Silo, com ordenação alfabética no cabeçalho e teste de paginação.
+
 - [x] Entregar orientações de produção e acesso para materiais baixáveis no CSV “Para escrever” e nos fundamentos do Redator.
 
 - [ ] Conferir a exportação real de “Plano de marketing estética: exemplos e templates” e validar a entrega do arquivo quando o redator disponibilizá-lo.
@@ -575,7 +579,7 @@ Validado manualmente: não. O detalhe, os testes e as limitações estão em `es
 - [ ] **Dono (homologação):** no Radar da marca 61d2e019, conferir que planilha, perfil ("Silo / função") e Workbench mostram "leads qualificados · Pilar" e os outros 7 artigos como Suporte. Conferir também que o card SERP do perfil diz "Finalizado · Google · 26 de 38 analisada(s)".
 - [ ] **Dono (SQL de leitura, opcional):** ler `payload->'hydration'->'silo'->>'articleRole'` e `siloDnaVersionId` das 8 linhas de `editorial_workflow_items` (stage radar), e o `pillarArticleId` das versões do SiloDNA. A leitura mostra se os entregáveis já gerados (CSV completo, artigo-modelo, plano de links) saíram com "support".
 - [ ] Decidir: artigos-modelo e CSVs gerados antes com o papel errado precisam ser refeitos? Organizar de novo é IA paga e exige autorização por artigo ou lote.
-- [ ] Decidir: a coluna Formato mostra a unidade (como hoje), o formato observado na SERP, ou sai?
+- [x] Em 2026-11-25, a coluna Formato deu lugar à coluna Silo. O filtro Formato segue na barra.
 - [ ] Decidir: o artigo-modelo pode propor link para irmão FORA do grafo aprovado? Hoje pode, e o candidato aparece sem a marca "pedido pelo grafo aprovado".
 - [ ] Decidir: quando o SiloDNA vigente diverge da foto do envio, só avisar (como hoje, na linha Função e no contexto editorial) ou bloquear o envio ao Redator até reenviar?
 - [ ] Decidir: mostrar a posição do Suporte na tela (Suporte 1..n pela `narrativeOrder`)? A régua já calcula.
