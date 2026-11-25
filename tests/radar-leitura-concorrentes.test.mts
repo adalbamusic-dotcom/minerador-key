@@ -80,7 +80,7 @@ test("o CSV mostra os temas, a limitação diz de qual camada fala, e o prompt l
   assert.match(fonte, /Tratado por 1 site só \(diferencial possível, se servir ao leitor\)/);
   assert.match(fonte, /limitacaoDaCamada\(item, amostra\)/);
   assert.match(fonte, /As \$\{paginasLidas\} páginas comparáveis, estas sim, foram lidas pela investigação/);
-  assert.match(fonte, /leve as três linhas juntas para a IA: "\$\{topo\}", "Voz da marca" e esta/);
+  assert.match(fonte, /descri.*nesta linha, com as regras gerais da linha "\$\{topo\}"\$\{contexto\.brandVoice \? ' e a linha "Voz da marca"'/);
   /* 2026-10-02 · D10: o prompt sai fechado — sem "proposta" nem "rascunho para revisão". */
   assert.doesNotMatch(fonte, /são PROPOSTA DA IA ainda não aprovada no Radar/);
 

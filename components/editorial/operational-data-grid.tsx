@@ -106,6 +106,7 @@ export interface OperationalDataGridProps<T extends { id: string }> {
   renderBulkBarAside?: (selectedRows: T[]) => React.ReactNode;
   /** 2026-10-12 · F2 dos grupos: recorte de TELA (o grupo ativo). `rows` continua a lista inteira; ausente = todas. */
   rowFilter?: (row: T) => boolean;
+  filterValueFor?: (row: T, filterId: string) => unknown;
 }
 
 const control = "h-7 rounded border border-divider bg-surface-subtle px-2 text-[12px] text-foreground/85 outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/45";
@@ -115,7 +116,7 @@ export const ROLAGEM_GRAVADA_APOS_MS = 150;
 export function OperationalDataGrid<T extends { id: string }>({ module, userId, brandId, rows, columns, loading = false, error = null,
   emptyTitle = "Nenhum item encontrado", searchPlaceholder = "Buscar…", bulkActions = [], renderBulkBar, renderActions, renderExpanded,
   onRowOrderChange, initialPageSize = 25, toolbar, title, description, expandedRowId, onExpandedRowChange, onSelectionChange, bulkSelectedRowIds, onBulkSelectionChange, activeRowId,
-  activeRowClassName = "bg-selected", bulkSelectedRowClassName = "bg-selected", onRowActivate, topbar, rowStripeClassName, renderBulkBarAside, rowFilter }: OperationalDataGridProps<T>) {
+  activeRowClassName = "bg-selected", bulkSelectedRowClassName = "bg-selected", onRowActivate, topbar, rowStripeClassName, renderBulkBarAside, rowFilter, filterValueFor }: OperationalDataGridProps<T>) {
   const [search, setSearch] = useState(""); const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<{ columnId: string; direction: "asc" | "desc" } | null>(null);
   const [uncontrolledBulkSelected, setUncontrolledBulkSelected] = useState<Set<string>>(new Set()); const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -164,7 +165,8 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
   }, [storageKey, gravarRolagemPendente]);
   const visibleColumns = columns.filter(column => !hidden.has(column.id));
   const queried = useMemo(() => applyGridQuery(rows, { search, searchText: row => columns.map(column => String(column.value(row) ?? "")).join(" "), filters,
-    filterValue: (row, columnId) => columns.find(column => column.id === columnId)?.value(row), sort, manualOrder }).filter(row => !rowFilter || rowFilter(row)), [rows, columns, search, filters, sort, manualOrder, rowFilter]);
+    filterValue: (row, columnId) => columns.find(column => column.id === columnId)?.value(row) ?? filterValueFor?.(row, columnId),
+    sort, manualOrder }).filter(row => !rowFilter || rowFilter(row)), [rows, columns, search, filters, sort, manualOrder, rowFilter, filterValueFor]);
   const safePageSize = pageSize === "all" ? (queried.length <= 1000 ? Math.max(queried.length, 1) : 200) : pageSize;
   const pages = Math.max(1, Math.ceil(queried.length / safePageSize)); const currentPage = Math.min(page, pages);
   const pageRows = queried.slice((currentPage - 1) * safePageSize, currentPage * safePageSize);

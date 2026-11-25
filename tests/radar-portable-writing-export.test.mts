@@ -418,6 +418,26 @@ test("D · PDF, planilha e imagens do Drive chegam ao CSV e ao Redator como tare
   assert.match(radarDownloadBrief(["checklist de implantação para baixar"])[0], /Arquivo baixável/);
 });
 
+test("SEO semântico exporta o ganho de novos e publicados e o volume apenas como referência", () => {
+  const entrada = entradaGoogle();
+  const novo = linhaComPlanta(entrada, contextoAvulso()).row;
+  const publicado = linhaComPlanta(entrada, contextoAvulso({ publication: PUBLICACAO_SEM_POLITICA })).row;
+  assert.match(novo.artigo, /^Volume da principal \(referência editorial\): 720 buscas\/mês/m);
+  assert.match(novo.estrutura, /^Ganho para o leitor: .*amostra competitiva deixou em aberto/m);
+  assert.match(publicado.estrutura, /^Ganho da revisão: preserve o que já ajuda o leitor/m);
+  assert.match(publicado.artigo, /preservar URL, slug e canonical/);
+  assert.doesNotMatch(novo.estrutura, /720 buscas|palavras\/600|primeiras ~100 palavras/);
+
+  const tecnologia = linhaComPlanta({
+    ...entrada,
+    researchContext: undefined,
+    article: { ...entrada.article, principalKeyword: "backup de fotos", secondaryKeywords: ["restaurar fotos apagadas"], narrativeReinforcements: [] },
+  }, contextoAvulso()).row;
+  assert.match(tecnologia.artigo, /Volume da principal \(referência editorial\): sem medição no pacote/);
+  assert.match(tecnologia.estrutura, /Cobertura transversal: restaurar fotos apagadas/);
+  assert.doesNotMatch(tecnologia.estrutura, /Cobertura transversal:.*skin care noturno/);
+});
+
 test("D · a contribuição ACEITA do especialista não some: sai com o aviso de que responde outra coisa", () => {
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   assert.match(pilar.fontes_e_especialista, /E1 · Pergunta: "O que causa acne" · Resposta aprovada: "Todo mundo fala de protetor solar/);
@@ -441,7 +461,7 @@ test("E · a estrutura é a planta concluída do artigo-modelo; a medida dos con
   assert.match(pilar.estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo; a redação é de quem escreve\)\./);
   assert.match(pilar.estrutura, /^Concorrentes comparáveis \([^)]+\): mediana de [\d.]+ palavras/m);
   assert.doesNotMatch(pilar.estrutura, /^Ordem sugerida/m, "a ordem sugerida do modelo editorial saiu");
-  assert.match(pilar.prompt, /siga o artigo-modelo da coluna estrutura \(seções, medidas, links e imagens da planta\), e a redação é de quem escreve/);
+  assert.match(pilar.prompt, /Siga o mapa de cobertura da coluna estrutura, os links do silo e o diferencial de cobrir_e_superar/);
   assert.doesNotMatch(pilar.prompt, /a estrutura é sugestão/);
 });
 

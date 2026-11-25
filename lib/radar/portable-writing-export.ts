@@ -1445,10 +1445,10 @@ export function radarWritingBlueprintExclusions(input: RadarPortableExportInput,
 function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, papel: string | null): string {
   const principal = texto(p.dna.principalKeyword);
   const volumes = new Map<string, RadarPortableKeywordDna>(p.keywords.map(item => [radarWritingCompareKey(item.keyword), item]));
-  /* 2026-10-14 · K6 (SDD silo interligado): a complementar vai dentro da seção, nunca abrindo um H2. */
+  const volumePrincipal = volumes.get(radarWritingCompareKey(principal))?.volume;
   const comoUsar = (papelDaKeyword: "SECONDARY" | "NARRATIVE") => (papelDaKeyword === "SECONDARY"
-    ? "faceta da mesma intenção: dentro da seção que trata do assunto (num H2, só natural e fora do começo)"
-    : "reforço no corpo, sem seção própria");
+    ? "faceta da intenção, conforme o mapa de cobertura da estrutura"
+    : "reforço de contexto na seção pertinente");
   const complementares = unicosPorChave([
     ...p.dna.secondaryKeywords.map(keyword => ({ keyword, papel: "SECONDARY" as const })),
     ...p.dna.narrativeReinforcements.map(keyword => ({ keyword, papel: "NARRATIVE" as const })),
@@ -1473,8 +1473,11 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
     ...radarWritingGroupLines(contexto.group, input.article.promise),
     "",
     `Keyword principal: ${principal || "não resolvida no pacote"}`,
-    /* 2026-10-09 · o destino da virada do Assunto (a coluna promessa legada que o dizia saiu; a planta o recebe no pedido). */
+    /* A identidade editorial precede métricas que servem apenas ao planejamento. */
     ...(p.assunto ? [`Assunto (tronco): ${p.assunto.phrase}${p.assunto.destinationUrl ? ` — destino da virada: ${radarWritingCleanUrl(p.assunto.destinationUrl)}` : ""}`] : []),
+    ...(principal ? [typeof volumePrincipal === "number"
+      ? `Volume da principal (referência editorial): ${numeroBr(volumePrincipal)} buscas/mês na medição registrada`
+      : "Volume da principal (referência editorial): sem medição no pacote"] : []),
     ...(complementares.length
       ? ["Keywords complementares:", ...complementares.map(item => {
         const volume = volumes.get(radarWritingCompareKey(item.keyword))?.volume;
@@ -3316,7 +3319,7 @@ function colunaPrompt(contexto: RadarWritingArticleContext, especificas: readonl
   }
   const topo = contexto.topRowLabel;
   return [
-    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}" deste arquivo (${contexto.brandVoice ? `leve as três linhas juntas para a IA: "${topo}", "Voz da marca" e esta` : "leve as duas linhas juntas para a IA"}). Em resumo: siga o artigo-modelo da coluna estrutura (seções, medidas, links e imagens da planta), e a redação é de quem escreve, na voz humana das regras gerais; keyword principal natural, 1× no H1 e no SEO title, sem repetir; nenhum H2 abre por ela; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}.`,
+    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}"${contexto.brandVoice ? ' e a linha "Voz da marca"' : ""} deste arquivo. Responda à intenção da principal desde a abertura. Siga o mapa de cobertura da coluna estrutura, os links do silo e o diferencial de cobrir_e_superar. Mantenha métricas fora da redação. Use a SERP como pesquisa e não copie frases nem títulos. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}, sem seção de perguntas frequentes.`,
     ...(especificas.length ? [`${formas.neste} ${unidade.noun}:`, ...especificas.map(item => `- ${comPontoFinal(item)}`)] : []),
     /* 2026-10-02 · D10 (decisão do dono): o prompt sai fechado — sem "proposta" nem "aguardando aprovação". */
   ].join("\n");
@@ -3812,8 +3815,9 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
       /* 2026-10-08 (correção da revisão) · a principal, para a ordem de leitura da busca "como …" também na planta antiga. */
       principal: texto(p.dna.principalKeyword),
       ...(publicado ? { currentH2: publicacao?.currentStructure?.h2 ?? null, keywords: keywordsDoArtigo(p) } : {}),
-      /* 2026-10-14 · K6 (SDD silo interligado): as keywords do artigo, para dizer o H2 que abre por uma complementar também no artigo novo. */
+      /* O núcleo orienta a malha. O mapa de cobertura usa apenas secundárias e reforços aprovados. */
       articleKeywords: keywordsDoArtigo(p),
+      coverageKeywords: [...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements],
       /* 2026-10-08 (correção) · F1 · os irmãos no ar (do mapa de publicações do lote): o destino planejado da planta sai publicado. */
       publishedMembers: irmaosNoAr(contexto),
       /*
@@ -3853,6 +3857,12 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
       /* 2026-10-09 · Defeito 3(b) · a seção da planta que toca o assunto de outro artigo do Silo: só menciona e linka. */
       ...(deOutroArtigo.length ? { sectionNotes: notasDaPlanta(contexto.blueprint, deOutroArtigo, nucleo, notaDeOutroArtigo) } : {}),
     }));
+    if (unidade.editorial && linha.estrutura) {
+      const ganho = publicado
+        ? "Ganho da revisão: preserve o que já ajuda o leitor e desenvolva a aplicação prática indicada na planta."
+        : "Ganho para o leitor: desenvolva a aplicação prática ou o critério de decisão que a amostra competitiva deixou em aberto.";
+      linha.estrutura = linha.estrutura.replace("\n", `\n${ganho}\n`);
+    }
   }
   if (contexto.brandVoice && !soIdentidade) {
     linha.promessa_e_leitor = [

@@ -52,6 +52,7 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
       { heading: "Quem decide", body: "Você escolhe o que importar e o que adotar." },
       { heading: "Depois", body: "Abra o artigo e pesquise no Google (etapa 2)." },
       { heading: "Conferir o endereço do artigo", body: "Na planilha, expanda a linha do artigo e abra “Ver fundamentos do Article”. Ali ficam o slug, o canonical e a URL publicada clicável quando há vínculo do Minerador." },
+      { heading: "Organizar por silo", body: "Na planilha, clique no cabeçalho “Silo” para ordenar de A a Z. Clique de novo para inverter a ordem." },
       { heading: "Situações comuns", body: "Artigo já finalizado (enviado ou não ao Redator) com a principal igual: “Adotar a versão nova” leva o artigo à versão nova e, na mesma confirmação, pesquisa só as keywords novas, finaliza de novo e organiza o artigo-modelo; a investigação antiga fica no histórico. Se já foi ao Redator, o documento de lá não muda: reenviar mostra “Atualização disponível”. Com a principal ou o slug novo, o artigo segue na versão enviada. Links novos do Silo são adotados sem refazer a pesquisa (“Adotar os links novos”)." },
     ],
     howToUse: [

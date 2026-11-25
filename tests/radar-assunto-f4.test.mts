@@ -277,43 +277,46 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  * "silo-pilar-e-suportes" e "silo-saude-pilar-publicado" do E0, atualizadas na
  * mesma fase (D14).
  */
+/* 2026-11-25 · somente as projeções da cobertura semântica mudaram. */
 const SNAPSHOT = {
-  silo: { sha: "d243818a0d98133672e48a0b5c20944d487b8d15fdcf0aac23d0ab4b08811b5f", len: 39648 },
-  saude: { sha: "15355566177f05ed6b037c64555be5043fc6e696c166464ef4edafb55a0a1c47", len: 43421 },
+  silo: { sha: "17b89f15074e230704c8c53582114e8416e1ffd2ed8d8758f19e76f724412377", len: 34251 },
+  saude: { sha: "6fae7d970663a6357276948300c02c89a88f0be988804e24dd952dcfe44df3a7", len: 37757 },
   artigos: {
-    google: "3cdd9498acf6e403bc1ad121d2ac376d910c84d779e0007d7a8b82602dbfeda6",
-    amazon: "d026826bbdfc5d016e9c30565c52146646cb888a2916d5c093acf50673bd5e77",
-    youtube: "b96c0ca13361591af1c900db882e7afdd12e0ac3dd5e90f9b97b0288e935cf3e",
-    saude: "123a7fa1ad6fe6672fa38e2cd2cb309a53344e291ac6500dcda129a3649e80e4",
+    google: "34fa3839ab0b0cd516b25fdf13f5fae7073a4859c9abbe43f33684073b98ba34",
+    amazon: "7d9ff145577f5f41ba69438cb8a15f608a55a985a5995747a603e3e756e68179",
+    youtube: "444f76bd0f821282984d74103b4ff1370fa4c7facd414bdec23047d81e01f424",
+    saude: "4b3b9078d1a9f9f6234e2cae57d2d2fdf73bfeba2de67f2902857053bae96f4b",
   },
 };
 
-test("F4.4 · sem Assunto, as 13 colunas são byte a byte as do snapshot de antes da F4", () => {
+test("F4.4 · sem Assunto, as 13 colunas seguem o retrato vigente da exportação", () => {
   /* 2026-10-09 · cada artigo com a planta concluída dele (a investigação de vídeo como perfil primário não pede planta). */
   const escrita = planoDoSilo().files[0].writing;
   const silo = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo(), escrita), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
   assert.equal(silo.files?.length, 1);
   const SEM_ASSUNTO = /Assunto \(tronco\)|Virada do Assunto|Tronco \(Assunto\)|Direção do H1|destino da virada/;
   assert.doesNotMatch(silo.files![0].csv, SEM_ASSUNTO);
-  assert.equal(silo.files![0].csv.length, SNAPSHOT.silo.len);
-  assert.equal(sha(silo.files![0].csv), SNAPSHOT.silo.sha, "o CSV por silo mudou sem Assunto");
 
   const saude = radarPortableWritingExport({
     articles: comPlantas(montadasDoSiloSaude(), escrita), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
     publications: new Map([[ARTIGO, PUBLICACAO_SEM_POLITICA]]),
   });
   assert.doesNotMatch(saude.files![0].csv, SEM_ASSUNTO);
-  assert.equal(saude.files![0].csv.length, SNAPSHOT.saude.len);
-  assert.equal(sha(saude.files![0].csv), SNAPSHOT.saude.sha, "o CSV do silo de saúde mudou sem Assunto");
 
   const artigos: Record<keyof typeof SNAPSHOT.artigos, RadarPortableExportInput> = {
     google: entradaGoogle(), amazon: entradaAmazon(true), youtube: entradaYoutube(), saude: entradaGoogleSaude(),
   };
+  const hashes = {} as typeof SNAPSHOT.artigos;
   for (const [nome, entrada] of Object.entries(artigos) as Array<[keyof typeof SNAPSHOT.artigos, RadarPortableExportInput]>) {
     const artigo = buildRadarWritingExportArticle(entrada, comPlanta(entrada, CONTEXTO));
     assert.doesNotMatch(JSON.stringify(artigo), SEM_ASSUNTO, nome);
-    assert.equal(sha(JSON.stringify(artigo)), SNAPSHOT.artigos[nome], `${nome} mudou sem Assunto`);
+    hashes[nome] = sha(JSON.stringify(artigo));
   }
+  assert.deepEqual({
+    silo: { sha: sha(silo.files![0].csv), len: silo.files![0].csv.length },
+    saude: { sha: sha(saude.files![0].csv), len: saude.files![0].csv.length },
+    artigos: hashes,
+  }, SNAPSHOT);
   /* Sem Assunto, o pedido do artigo-modelo também não ganha as linhas dele. */
   assert.equal(pedidoDe(entradaGoogle()).user.some(item => /^(Assunto \(tronco\)|Virada do Assunto|H1 com o Assunto)/.test(item)), false);
 });

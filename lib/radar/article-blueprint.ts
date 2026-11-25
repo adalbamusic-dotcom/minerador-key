@@ -87,24 +87,18 @@ import {
 /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (uma fonte só: pedido, conferência, leitura e colunas). */
 /* 2026-10-14 · e as regras de keyword e título K1–K9 com as conferências V1–V7 (SDD silo interligado). */
 import {
-  RADAR_HUMAN_VOICE_CLOSING_STEPS,
   RADAR_HUMAN_VOICE_GUIDELINE_VERSION,
   RADAR_HUMAN_VOICE_H2,
-  RADAR_HUMAN_VOICE_KEYWORD_DENSITY,
   RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS,
-  RADAR_HUMAN_VOICE_LOCAL_AUTHORITY,
-  RADAR_HUMAN_VOICE_OPENING_WORDS,
   RADAR_HUMAN_VOICE_SEMANTIC_VARIANTS,
   RADAR_HUMAN_VOICE_TITLE_ANGLES,
   RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX,
   RADAR_HUMAN_VOICE_TITLE_OPTIONS,
-  RADAR_KEYWORD_PRECEDENCE,
   RADAR_KEYWORD_RULES_VERSION,
   radarHeadingStartsWithKeyword,
   radarHeadingsSameOpening,
   radarHumanVoiceGenericBait,
   radarHumanVoicePromptBlock,
-  radarKeywordBodyCap,
   radarKeywordCrudeDiffersFromNatural,
   radarKeywordCrudeFormPresent,
   radarKeywordOccurrences,
@@ -5307,6 +5301,8 @@ export type RadarArticleBlueprintColumnsOptions = {
    * artigo novo também. Ausente = as de `keywords` (só no publicado).
    */
   articleKeywords?: readonly string[];
+  /** Complementares e reforços da versão transportada. O Assunto pertence à identidade editorial. */
+  coverageKeywords?: readonly string[];
   /**
    * 2026-10-08 (correção) · F1 · Os irmãos do Silo que já estão no ar (pelo
    * caminho planejado e pelo nome) e a URL deles: o destino que a planta gravou
@@ -5949,42 +5945,22 @@ export function radarArticleBlueprintColumns(
   const evidenciasDe = (prefixo: string, quantas: number) => (Array.isArray(payload.evidence) ? payload.evidence : [])
     .filter(item => item && typeof item.id === "string" && new RegExp(`^${prefixo}\\d`).test(item.id) && t(item.text)).slice(0, quantas);
   const tituloDoOrganico = (texto: string) => corte(t(texto).split(" · ")[0].replace(/^["“]|["”]$/g, ""), 90);
-  /*
-   * 2026-10-14 · K1–K9 NA COLUNA DE TÍTULO (SDD silo interligado, D4 e D6). A
-   * planta gravada não muda; o CSV diz, como instrução concluída, a forma natural,
-   * o que repete a principal, as opções que abrem por ela e as que dizem o mesmo,
-   * e como escrever a afirmação travada do título. Saíram "comece pela keyword" e
-   * "a keyword nos primeiros 60 da meta".
-   */
+  /* A leitura conserva os títulos da planta aprovada e orienta a redação pelo sentido da busca. */
   const principalDoCsv = t(opcoes.principal ?? "");
   const naturalDaPlanta = t(b.title.principalNatural);
   const naturalDoCsv = naturalDaPlanta && principalDoCsv && radarKeywordOccurrences(naturalDaPlanta, principalDoCsv) === 1 ? naturalDaPlanta : "";
   const cruaDoCsv = naturalDoCsv && radarKeywordCrudeDiffersFromNatural(principalDoCsv, naturalDoCsv) ? principalDoCsv : "";
-  const complementaresDoCsv = [...new Set([...keywordsDoCsv, ...(opcoes.articleKeywords || []).map(item => t(item))].filter(Boolean))]
-    .filter(item => radarWritingCompareKey(item) !== radarWritingCompareKey(principalDoCsv));
   const opcoesDoTitulo = [b.title.h1, ...b.title.alternatives].map(item => t(item)).filter(Boolean).slice(0, RADAR_HUMAN_VOICE_TITLE_OPTIONS);
   const ajustesDoTitulo: string[] = [];
   const conferirTitulo = (quem: string, valor: string) => {
     if (!t(valor)) return;
-    const vezes = principalDoCsv ? radarKeywordOccurrences(valor, principalDoCsv) : 0;
-    if (vezes > 1) ajustesDoTitulo.push(`- Ajuste ${quem}: a keyword principal aparece ${vezes} vezes; deixe uma, na forma natural.`);
     if (cruaDoCsv && radarKeywordCrudeFormPresent(valor, cruaDoCsv)) ajustesDoTitulo.push(`- Ajuste ${quem}: troque a forma crua "${cruaDoCsv}" pela natural "${naturalDoCsv}".`);
     const isca = radarHumanVoiceGenericBait(valor, keywordsDoCsv);
-    if (isca) ajustesDoTitulo.push(`- Ajuste ${quem}: troque "${isca}" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo).`);
+    if (isca) ajustesDoTitulo.push(`- Ajuste ${quem}: torne explícitos o problema do leitor e a entrega concreta da página.`);
   };
   opcoesDoTitulo.forEach((opcao, indice) => conferirTitulo(indice === 0 ? "do H1" : `da alternativa ${indice}`, opcao));
   conferirTitulo("do SEO title", b.title.seoTitle);
   conferirTitulo("da meta description", b.title.metaDescription);
-  if (principalDoCsv && t(b.title.h1) && !radarKeywordOccurrences(b.title.h1, principalDoCsv)) {
-    ajustesDoTitulo.push("- Ajuste do H1: traga a keyword principal uma vez, na forma natural, em qualquer posição.");
-  }
-  if (principalDoCsv && t(b.title.seoTitle) && !radarKeywordWithinChars(b.title.seoTitle, principalDoCsv)) {
-    ajustesDoTitulo.push(`- Ajuste do SEO title: a keyword principal uma vez, na forma natural, dentro dos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres (o Google corta ali).`);
-  }
-  const abremPelaKeyword = principalDoCsv ? radarTitleOptionsOpenedByKeyword(opcoesDoTitulo, principalDoCsv) : 0;
-  if (abremPelaKeyword > RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX) {
-    ajustesDoTitulo.push(`- Ajuste das opções: a keyword principal abre ${abremPelaKeyword} das ${opcoesDoTitulo.length} opções; só ${RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX} pode abrir por ela: nas outras, o gancho vem primeiro e a principal entra depois, natural.`);
-  }
   const angulosDoTitulo = radarTitleOptionsDistinct(opcoesDoTitulo, principalDoCsv);
   if (opcoesDoTitulo.length > 1 && !angulosDoTitulo.distinct) {
     const pares = [...angulosDoTitulo.sameOpening, ...angulosDoTitulo.similar].map(([a, c]) => `${a === 0 ? "o H1" : `a alternativa ${a}`} e a alternativa ${c}`)
@@ -5993,7 +5969,7 @@ export function radarArticleBlueprintColumns(
     ajustesDoTitulo.push(`- Ajuste das opções: ${pares.length === todosOsPares && opcoesDoTitulo.length > 2 ? `as ${opcoesDoTitulo.length} opções` : pares.join("; ")} começam igual ou dizem o mesmo; dê a cada opção um ângulo: (a) ${RADAR_HUMAN_VOICE_TITLE_ANGLES[0]}; (b) ${RADAR_HUMAN_VOICE_TITLE_ANGLES[1]}; (c) ${RADAR_HUMAN_VOICE_TITLE_ANGLES[2]}.`);
   }
   if (opcoesDoTitulo.length < RADAR_HUMAN_VOICE_TITLE_OPTIONS) {
-    ajustesDoTitulo.push(`- Escreva mais ${contagem(RADAR_HUMAN_VOICE_TITLE_OPTIONS - opcoesDoTitulo.length, "opção", "opções")}, cada uma num ângulo diferente (${RADAR_HUMAN_VOICE_TITLE_ANGLES.join("; ")}), com a principal natural uma vez, em qualquer posição.`);
+    ajustesDoTitulo.push(`- Escreva mais ${contagem(RADAR_HUMAN_VOICE_TITLE_OPTIONS - opcoesDoTitulo.length, "opção", "opções")}, cada uma num ângulo diferente (${RADAR_HUMAN_VOICE_TITLE_ANGLES.join("; ")}), identificando o tema e o benefício em linguagem natural.`);
   }
   if (titulosTravados) {
     ajustesDoTitulo.push("- Afirmação do título que só entra com fonte (está na lista do fim da coluna estrutura): no título publicado, escreva-a como promessa delimitada pela marca (o que ela verifica e entrega, sem efeito garantido) ou use outra opção; título e meta nunca levam marca.");
@@ -6008,12 +5984,8 @@ export function radarArticleBlueprintColumns(
     .map(item => `${item.pattern}${item.seenIn.length ? ` (${item.seenIn.slice(0, 3).join(", ")})` : ""}`);
   const anguloDeDiferenciacao = t(b.competitive?.angle) || null;
   const linhasDoTituloPelaSerp = [
-    `Título pela SERP (regras de keyword ${RADAR_KEYWORD_RULES_VERSION}, diretriz de comunicação humana ${RADAR_HUMAN_VOICE_GUIDELINE_VERSION}): ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções (o H1 e as alternativas acima); a keyword principal, na forma natural, aparece uma vez em cada uma, em qualquer posição, e abre no máximo ${RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX} delas; cada opção tem um ângulo (${RADAR_HUMAN_VOICE_TITLE_ANGLES.join("; ")}); nunca isca genérica ("guia prático", "dicas", "o que é", "tudo sobre") nem marca de processo. O SEO title segue a opção escolhida, até ~${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres, com a principal dentro dos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS}.`,
-    ...(principalDoCsv
-      ? [naturalDoCsv
-        ? `Forma natural da principal (K1): "${naturalDoCsv}"${cruaDoCsv ? `; a forma crua "${cruaDoCsv}" não aparece em título nem em H2` : ""}.`
-        : `Forma natural da principal (K1): escreva "${principalDoCsv}" em português correto (com a preposição e a flexão que a frase pede), uma vez no H1 e uma vez no SEO title; em título e H2, nunca a forma truncada.`]
-      : []),
+    "Título pela SERP: H1, título SEO e meta devem identificar a entidade central e a resposta que o leitor encontrará. Use o vocabulário da busca e uma promessa específica que as seções entreguem.",
+    ...(principalDoCsv ? [`Forma natural da principal: "${naturalDoCsv || principalDoCsv}". Ajuste preposições e flexões para escrever com clareza.`] : []),
     ...ajustesDoTitulo,
     ...(dores.length || topo.length
       ? [`Gancho pela SERP: ${dores.length ? `a dor vem das perguntas reais (${dores.join("; ")})` : "a dor vem das perguntas da abertura e das seções"}${topo.length ? `; o contraste, dos títulos do topo (${topo.join("; ")})${iscasDoTopo.length ? `, que prometem ${iscasDoTopo.map(item => `"${item}"`).join(", ")}: o título promete a saída que eles não dão` : ": o título promete o que eles não prometem"}` : ""}.`]
@@ -6022,22 +5994,9 @@ export function radarArticleBlueprintColumns(
     ...(seoAntigoDoTitulo.length
       ? [`SEO antigo do topo, que o título não copia: ${seoAntigoDoTitulo.join("; ")}${anguloDeDiferenciacao ? `; o título promete o ângulo "${corte(anguloDeDiferenciacao, 140)}"` : ""}.`]
       : []),
-    `Meta description pela SERP (K4): natural, com dor ou contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo (autoridade, serviço real, experiência de quem assina); a principal ou uma variação próxima uma vez, em qualquer posição; até ~155 caracteres; as ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções seguem os ângulos do título.`,
+    "Meta description: resuma o que o leitor conseguirá entender, decidir ou fazer com a página.",
   ];
-  /*
-   * 2026-10-14 · K5–K7 NA ESTRUTURA: os H2 que abrem pela principal ou por uma
-   * complementar (V1), a principal em mais de 1 H2 (V2), dois H2 com o mesmo
-   * começo, o teto de repetição no corpo e as variações (as da planta nova, com o
-   * id da evidência; na planta gravada, as buscas relacionadas e os conceitos do
-   * pacote, sem IA).
-   */
-  const keywordQueAbre = (h2: string): string | null => (principalDoCsv
-    ? [principalDoCsv, ...complementaresDoCsv].find(keyword => radarHeadingStartsWithKeyword(h2, keyword)) ?? null
-    : null);
-  const h2ComPrincipal = principalDoCsv ? b.sections.filter(secao => radarKeywordOccurrences(secao.h2, principalDoCsv) > 0).length : 0;
   const h2ComMesmoComeco = radarHeadingsSameOpening(b.sections.map(secao => secao.h2));
-  const palavrasDoPlano = m.plan.wordsMax ?? m.plan.wordsMin ?? m.serp.words.median ?? null;
-  const tetoNoCorpo = radarKeywordBodyCap(palavrasDoPlano);
   const semContagem = (texto: string) => corte(t(texto).replace(/\s*\(\d+ de \d+ páginas?[^)]*\)\s*$/, "").replace(/[?.!\s]+$/, ""), 60);
   const variacoesDoCsv = (b.semanticVariants?.length
     ? b.semanticVariants.map(item => `${t(item.term)}${item.evidence.length ? ` [${item.evidence.join(", ")}]` : ""}`)
@@ -6045,14 +6004,35 @@ export function radarArticleBlueprintColumns(
       .filter(item => !principalDoCsv || !radarKeywordOccurrences(item.text, principalDoCsv))
       .map(item => `${semContagem(item.text)} [${item.id}]`))
     .filter(Boolean).slice(0, RADAR_HUMAN_VOICE_SEMANTIC_VARIANTS.max);
-  const linhaDoH2DaSecao = (secao: RadarArticleBlueprintAi["sections"][number]): string[] => {
-    const keyword = keywordQueAbre(secao.h2);
-    if (keyword) return [`- H2 (K6): abre pela keyword "${keyword}"; escreva este H2 pelo subtema ou pela pergunta da seção ("${t(secao.readerQuestion).replace(/[?.!\s]+$/, "")}"), com a keyword dentro da seção, não no começo do título.`];
-    if (cruaDoCsv && radarKeywordCrudeFormPresent(secao.h2, cruaDoCsv)) return [`- H2 (K1): troque a forma crua "${cruaDoCsv}" pela natural "${naturalDoCsv}".`];
-    return [];
+  const planoDeKeywords = new Map(b.keywordPlan.complementary.map(item => [radarWritingCompareKey(item.keyword), item]));
+  const termosDeCobertura = new Map((opcoes.coverageKeywords ?? b.keywordPlan.complementary.map(item => item.keyword))
+    .map(item => [radarWritingCompareKey(item), item]));
+  termosDeCobertura.delete(radarWritingCompareKey(principalDoCsv));
+  termosDeCobertura.delete("");
+  const coberturaPorSecao = new Map<number, string[]>();
+  const termosSemSecao: string[] = [];
+  for (const [chave, keyword] of termosDeCobertura) {
+    const colocacao = t(planoDeKeywords.get(chave)?.placement ?? "");
+    const titulo = colocacao.match(/["“]([^"”]+)["”]|['‘]([^'’]+)['’]/)?.slice(1).find(Boolean) ?? colocacao;
+    const numero = colocacao.match(/(?:se[cç][aã]o|H2)\s+(\d+)\b/i)?.[1];
+    const peloTitulo = b.sections.findIndex(secao => radarWritingCompareKey(secao.h2) === radarWritingCompareKey(titulo));
+    const peloNumero = numero ? Number(numero) - 1 : -1;
+    const candidatas = b.sections.flatMap((secao, indice) => [secao.readerQuestion, secao.answerFirst, ...secao.terms, ...secao.h3, ...secao.explain]
+      .some(termo => radarKeywordOccurrences(termo, keyword) > 0) ? [indice] : []);
+    const indice = peloTitulo >= 0 ? peloTitulo
+      : peloNumero >= 0 && peloNumero < b.sections.length ? peloNumero
+      : candidatas.length === 1 ? candidatas[0] : -1;
+    if (indice < 0) termosSemSecao.push(keyword);
+    else coberturaPorSecao.set(indice, [...(coberturaPorSecao.get(indice) ?? []), keyword]);
+  }
+  const linhasDeCobertura = (secao: RadarArticleBlueprintAi["sections"][number], indice: number): string[] => {
+    const termos = coberturaPorSecao.get(indice) ?? [];
+    const tituloAbrePorComplementar = termos.some(termo => radarHeadingStartsWithKeyword(secao.h2, termo));
+    return [
+      ...(termos.length ? [`- Cobertura semântica: ${termos.join(" · ")} → seção "${secao.h2}". Responda à necessidade expressa por esses termos, usando a entidade e o recorte do artigo.`] : []),
+      ...(tituloAbrePorComplementar ? [`- Título final da seção "${secao.h2}": nomeie a entrega concreta desta seção. Se a expressão for ampla, delimite a entidade e leve a variação natural para o corpo.`] : []),
+    ];
   };
-  const comKeywordNoComeco = b.sections.filter(secao => keywordQueAbre(secao.h2));
-  const lugarDaComplementar = (lugar: string) => lugar.replace(/\bH2\s+(?:da\s+se[cç][aã]o\s+)?(\d+)/gi, "dentro da seção $1");
   const juntaDe = new Map(leitura.h2Merges.map(item => [item.section, item.into]));
   /* A seção que entra como H3 vem logo depois da que a recebe (o "## " mais perto acima dela é sempre o H2 dela). */
   const ordemDasSecoes = b.sections.flatMap((_, indice) => (juntaDe.has(indice)
@@ -6075,31 +6055,25 @@ export function radarArticleBlueprintColumns(
       "",
       `Diferencial da marca (regras ${RADAR_CLOSING_RULES_VERSION}; a entrega primeiro, o nome do método depois, uma vez):`,
       ...diferencial.method.map(item => `- Método: ${comFonte(item.deliverable, null)}${item.methodName ? ` — isso tem nome: ${item.methodName} (dito uma vez, depois da entrega)` : ""}${item.section ? ` · seção "${item.section}"` : ""}`),
-      ...(t(diferencial.vsGeneric) ? [`- Contra o genérico (agência de posts e anúncios): ${comFonte(diferencial.vsGeneric, null)}`] : []),
+      ...(t(diferencial.vsGeneric) ? ["- Diferenciação: descreva a entrega concreta da marca e o problema que ela resolve. Use comparações somente quando forem pertinentes à busca e sustentadas por fonte."] : []),
       ...diferencial.localSignals.map(item => `- Autoridade local: ${item.signal}${item.section ? ` · seção "${item.section}"` : ""}`),
       ...(t(diferencial.bottomFunnel) ? [`- Fundo de funil (a seção de decisão: critérios, custo, prazo, como avaliar quem executa): ${comFonte(diferencial.bottomFunnel, null)}`] : []),
     ]
     : [];
   const vozESeo = [
-    `Voz e SEO pela SERP (diretriz de comunicação humana ${RADAR_HUMAN_VOICE_GUIDELINE_VERSION} e regras de keyword ${RADAR_KEYWORD_RULES_VERSION}, regra geral da linha de topo):`,
-    /* 2026-10-14 · K5: a abertura nas primeiras ~100 palavras, não a primeira frase. */
-    `- Abertura (K5): o primeiro parágrafo responde à busca com ${formaDaPrincipal ? `"${formaDaPrincipal}"${naturalDoCsv ? "" : " (na forma natural)"}` : "a keyword principal"} ou uma variação próxima nas primeiras ~${RADAR_HUMAN_VOICE_OPENING_WORDS} palavras, e entra na dor da SERP, para quem já tentou posts, feed, anúncio e agência (nível 3).`,
-    /* 2026-10-14 · K6: nenhum H2 abre pela principal nem por complementar (V1), a principal em no máximo 1 H2 (V2), dois H2 sem o mesmo começo. */
-    comKeywordNoComeco.length
-      ? `- H2 sem keyword no começo (K6): ${contagem(comKeywordNoComeco.length, "H2 abre", "H2 abrem")} pela keyword (${comKeywordNoComeco.map(secao => `"${secao.h2}" → "${keywordQueAbre(secao.h2)}"`).join("; ")}); escreva cada um pelo subtema ou pela pergunta da seção (a linha da seção diz qual), com a keyword dentro da seção.`
-      : "- H2 sem keyword no começo (K6): nenhum H2 abre pela principal nem por uma complementar.",
-    ...(h2ComPrincipal > 1 ? [`- A keyword principal está em ${h2ComPrincipal} H2: deixe-a em no máximo 1 (K6).`] : []),
-    ...h2ComMesmoComeco.map(([a, c]) => `- Os H2 "${b.sections[a].h2}" e "${b.sections[c].h2}" começam pelas mesmas palavras: comece um deles pelo que ele tem de próprio (K6).`),
-    /* 2026-10-14 · K7: o teto de repetição e as variações. */
-    `- Keyword no corpo (K7): ${formaDaPrincipal ? `"${formaDaPrincipal}"` : "a keyword principal"} até ${tetoNoCorpo} vezes no texto (${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.base} + palavras/${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.wordsPerExtra}${palavrasDoPlano ? `, sobre até ${palavrasDoPlano} palavras do plano` : ""}); o resto em variações${variacoesDoCsv.length ? `: ${variacoesDoCsv.join("; ")}` : " (sinônimos, entidades e buscas relacionadas da SERP)"}. ${RADAR_KEYWORD_PRECEDENCE}`,
+    "Cobertura semântica guiada pela SERP:",
+    `- Abertura: responda à intenção de ${formaDaPrincipal ? `"${formaDaPrincipal}"` : "busca do leitor"} e antecipe a entrega prática.`,
+    "- H2: dê a cada seção um título que identifique sua pergunta ou entrega. Use vocabulário de busca quando esclarecer o conteúdo.",
+    ...h2ComMesmoComeco.map(([a, c]) => `- Diferencie os títulos "${b.sections[a].h2}" e "${b.sections[c].h2}" pelo que cada seção resolve.`),
+    ...(variacoesDoCsv.length ? [`- Entidades e variações observadas na SERP: ${variacoesDoCsv.join(" · ")}. Use as que sustentam a intenção e a pergunta da seção.`] : []),
     juntaDe.size
       ? `- H2: ${h2DaLeitura} (Regra 8 do Guia: de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max}). A planta tem ${b.sections.length} seções: ${juntaDe.size === 1 ? "a marcada" : `as ${juntaDe.size} marcadas`} "H3 do H2 acima" ${juntaDe.size === 1 ? "entra" : "entram"} como H3, com a cobertura, os links e a imagem.`
       : `- H2: ${b.sections.length} (Regra 8 do Guia: de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max}).`,
     /* 2026-10-14b · F3 · com o diferencial da planta nova, os sinais locais são os dela (acima, com a seção). */
     diferencial?.localSignals.length
       ? `- Autoridade local: os ${diferencial.localSignals.length} sinais do "Diferencial da marca", cada um na seção dita.`
-      : `- Autoridade local: 2 ou 3 sinais, onde o trecho pedir (${RADAR_HUMAN_VOICE_LOCAL_AUTHORITY.join("; ")}).`,
-    `- Fechamento em 4 tempos: ${RADAR_HUMAN_VOICE_CLOSING_STEPS.join(" → ")}; a virada e o fim explicam a busca orgânica sem sigla (nível 2).`,
+      : "- Autoridade: inclua experiência ou referências verificáveis pertinentes à pergunta e ao contexto do artigo.",
+    "- Fechamento: retome o problema do leitor, sintetize a resposta e dê um próximo passo proporcional à intenção e ao que a página demonstrou.",
     temCapa && respiros
       ? `- Imagens: capa e ${contagem(respiros, "imagem", "imagens")} no corpo, nas seções indicadas.`
       : `- Imagens: ${temCapa ? "a capa está no plano; " : "a capa é obrigatória (prompt a partir do H1, sem texto legível); "}${respiros ? `${contagem(respiros, "imagem", "imagens")} no corpo` : `ponha ao menos uma imagem útil no corpo, na seção "${b.sections[Math.min(1, b.sections.length - 1)]?.h2 ?? primeiroH2}", explicando a ideia dela`}.`,
@@ -6121,11 +6095,7 @@ export function radarArticleBlueprintColumns(
       : `Concorrentes comparáveis (${m.serp.comparablePages}): mediana de ${m.serp.words.median ?? "?"} palavras, ${m.serp.h2 ?? "?"} H2, ${m.serp.h3 ?? "?"} H3, ${m.serp.paragraphs ?? "?"} parágrafos, ${m.serp.images ?? "?"} imagens.`,
     /* 2026-10-14b · F3 (D11 e D12) · com a leitura competitiva, a faixa de referência da amostra relevante (sem quem está fora do leitor, do território ou da curva), nunca meta. */
     ...(radarCompetitiveReferenceLine(opcoes.competitiveReading) ? [radarCompetitiveReferenceLine(opcoes.competitiveReading)!] : []),
-    /* 2026-10-02 · campo que veio vazio não deixa rótulo solto ("Keywords: ", "→  ()", "— "). */
-    ...(b.keywordPlan.reading ? [`Keywords: ${b.keywordPlan.reading}`] : b.keywordPlan.complementary.length ? ["Keywords:"] : []),
-    /* 2026-10-14 · K6: a complementar vai dentro da seção ("H2 2" da planta gravada vira "dentro da seção 2"). */
-    ...b.keywordPlan.complementary.map(item => `- ${item.keyword}${item.placement ? ` → ${lugarDaComplementar(item.placement)}` : ""}${item.reason ? ` (${item.reason})` : ""}`),
-    ...(b.keywordPlan.slugNote ? [`Slug × principal: ${b.keywordPlan.slugNote}`] : []),
+    ...(termosSemSecao.length ? [`Cobertura transversal: ${termosSemSecao.join(" · ")}. Use no corpo apenas quando esclarecerem uma pergunta já prevista e respeitarem o assunto. Termos amplos devem ser contextualizados pela entidade, pelo leitor e pelo papel no silo.`] : []),
     "",
     `Abertura: responder "${b.opening.readerQuestion}" no primeiro parágrafo${b.opening.direction ? ` — ${comFonte(b.opening.direction, null)}` : ""}${b.opening.evidence.length ? ` [${rotuloDaEvidencia(payload, b.opening.evidence, null, opcoes.evidenceText ?? null).join("; ")}]` : ""}`,
     ...(ordemDaBusca ? [ordemDaBusca] : []),
@@ -6138,8 +6108,8 @@ export function radarArticleBlueprintColumns(
         : [`## ${secao.h2}`]),
       /* 2026-10-09 (correção) · 12 · na seção enquadrada, a pergunta diz de que lado é respondida. */
       `- Pergunta do leitor: ${secao.readerQuestion}${paraOLeitor(secao) ? ` (responda do ponto de vista de quem vende: o que ${negocioDoLeitor} ganha e perde com isso, não como quem compra escolhe)` : ""}`,
-      /* 2026-10-14 · K6/K1: o H2 que abre pela keyword (ou usa a forma crua) ganha a instrução concluída. */
-      ...linhaDoH2DaSecao(secao),
+      /* O destino da complementar é a seção que responde à necessidade. */
+      ...linhasDeCobertura(secao, indice),
       ...origemDaSecao(payload, secao),
       `- Abre respondendo: ${comFonte(semCena(secao.answerFirst) ?? RESPOSTA_SEM_CENA, indice)}${paraOLeitor(secao) && orientaQuemCompra(secao.answerFirst) ? reescritaParaOLeitor : ""}`,
       /* 2026-10-09 · 12 · a seção que fala com quem compra, num artigo para quem vende: o enquadramento concluído. */
@@ -6314,18 +6284,15 @@ export function radarArticleBlueprintColumns(
       `Leitor: ${leitorUnico}`,
       `Promessa: ${promessaMarcada}`,
       `Ângulo: ${anguloMarcado}${evidenciaDoAngulo.length ? ` [${rotuloDaEvidencia(payload, evidenciaDoAngulo, null, opcoes.evidenceText ?? null).join("; ")}]` : ""}`,
-      /* 2026-10-14b · F3 · o ângulo de diferenciação da análise competitiva e o contraste com o genérico (planta nova). */
+      /* O ângulo competitivo explicita a entrega que falta na amostra. */
       ...(anguloDeDiferenciacao ? [`Ângulo de diferenciação (análise competitiva; a entrega que a amostra relevante não tem): ${comFonte(anguloDeDiferenciacao, null)}`] : []),
-      ...(t(diferencial?.vsGeneric) ? [`Contra o genérico: ${comFonte(t(diferencial!.vsGeneric), null)}`] : []),
     ].join("\n")),
     titulo_e_seo: ([
       `H1: ${h1Marcado}`,
       ...(alternativasMarcadas.length ? [`Alternativas: ${alternativasMarcadas.join(" · ")}`] : []),
       `SEO title: ${seoTitleMarcado}`,
       `Meta description: ${metaMarcada}`,
-      /* 2026-10-14 · K2 e K5–K7: onde a principal entra (no lugar da lista "H1, primeiro parágrafo, H2 da seção 1" da planta). */
-      `Keyword principal (K2, K5–K7): uma vez no H1 e uma vez no SEO title, na forma natural, em qualquer posição; no primeiro parágrafo, ela ou uma variação próxima nas primeiras ~${RADAR_HUMAN_VOICE_OPENING_WORDS} palavras; em no máximo 1 H2, nunca no começo; no corpo, até ${tetoNoCorpo} vezes; o resto em variações (estrutura, "Keyword no corpo").`,
-      /* 2026-10-11b · regra 28: as 3 opções, o ajuste de cada uma e o gancho pela SERP (instrução concluída). */
+      "Termo principal: mantenha o sentido da busca no título, na abertura e na cobertura. Use a redação mais clara e específica para o leitor.",
       ...linhasDoTituloPelaSerp,
     ].join("\n")),
     estrutura,

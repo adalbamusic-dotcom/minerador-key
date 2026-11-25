@@ -246,13 +246,15 @@ test("fonte única · o núcleo da diretriz chega IGUAL ao pedido, à linha 'Sil
 
   /* Todos levam o MESMO núcleo e a MESMA precedência. */
   for (const [onde, texto] of [
-    ["pedido", system], ["linha Silo", topo.prompt], ["Redator", SECTION_WRITING_SYSTEM_PROMPT], ["melhoria", IMPROVE_SYSTEM_PROMPT],
+    ["pedido", system], ["Redator", SECTION_WRITING_SYSTEM_PROMPT], ["melhoria", IMPROVE_SYSTEM_PROMPT],
     ["vídeo", radarHumanVoiceVideoRule()], ["semente", SCRIPT_SEED_SYSTEM_PROMPT], ["catálogo", radarHumanVoiceCatalogNote()],
   ] as const) {
     assert.ok(texto.includes(RADAR_HUMAN_VOICE_CORE), `${onde}: o núcleo`);
     assert.ok(texto.includes(RADAR_HUMAN_VOICE_PRECEDENCE), `${onde}: a precedência`);
   }
-  for (const texto of [system, topo.prompt, radarHumanVoiceCatalogNote()]) assert.ok(texto.includes(RADAR_HUMAN_VOICE_SERP_SUMMARY), "o título, a meta e o CTA pela SERP");
+  assert.match(topo.prompt, /SEO semântico: use a principal para orientar a resposta/);
+  assert.ok(topo.prompt.includes(RADAR_HUMAN_VOICE_PRECEDENCE));
+  for (const texto of [system, radarHumanVoiceCatalogNote()]) assert.ok(texto.includes(RADAR_HUMAN_VOICE_SERP_SUMMARY), "o título, a meta e o CTA pela SERP");
 });
 
 test("fonte única · o MCP, os fundamentos do Redator e o catálogo chamam a mesma fonte (estrutural, sem comentários)", async () => {
@@ -381,19 +383,13 @@ test("título · CSV do caso real: a regra nova, a forma natural, as 3 opções 
     "SEO title: Como atrair um cliente: guia prático para clínicas",
     "Meta description: Descubra como atrair um cliente com estratégias práticas de abordagem, canais e experiência. Aprenda a conquistar e fidelizar clientes sem depender de anúncios.",
   ]);
-  assert.match(titulo[4], /^Keyword principal \(K2, K5–K7\): uma vez no H1 e uma vez no SEO title, na forma natural, em qualquer posição; .* no corpo, até 7 vezes;/);
-  assert.match(titulo[5], /^Título pela SERP \(regras de keyword 2026-10-14, diretriz de comunicação humana 2026-10-11\): 3 opções \(o H1 e as alternativas acima\); a keyword principal, na forma natural, aparece uma vez em cada uma, em qualquer posição, e abre no máximo 1 delas/);
-  assert.equal(titulo[6], "Forma natural da principal (K1): escreva \"como atrair um cliente\" em português correto (com a preposição e a flexão que a frase pede), uma vez no H1 e uma vez no SEO title; em título e H2, nunca a forma truncada.");
-  assert.ok(titulo.includes("- Ajuste das opções: a keyword principal abre 3 das 3 opções; só 1 pode abrir por ela: nas outras, o gancho vem primeiro e a principal entra depois, natural."));
-  assert.ok(titulo.includes("- Ajuste da alternativa 1: troque \"guia prático\" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo)."));
-  assert.ok(titulo.includes("- Ajuste do SEO title: troque \"guia prático\" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo)."));
-  assert.ok(titulo.includes("- Ajuste da meta description: troque \"descubra\" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo)."));
-  assert.equal(titulo.some(item => /^- Ajuste do H1: comece|nos primeiros 60 caracteres\.$/.test(item)), false, "a regra antiga saiu");
-  assert.ok(titulo.includes("Gancho pela SERP: a dor vem das perguntas reais (P1 \"Qual o segredo para atrair clientes?\"; B1 \"como atrair clientes sem gastar dinheiro\"); o contraste, dos títulos do topo (S1 \"10 dicas eficazes de como conquistar novos clientes\"; S2 \"Como atrair clientes: 10 dicas infalíveis\"; S3 \"Como Atrair Clientes para Pequeno Negócio | Guia Prático\"), que prometem \"dicas\", \"guia prático\": o título promete a saída que eles não dão."), titulo.join("\n"));
-  assert.match(titulo[titulo.length - 1], /^Meta description pela SERP \(K4\): natural, com dor ou contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo/);
-  /* Planta sem alternativas: a coluna manda escrever as que faltam, cada uma num ângulo. */
-  const semAlternativas = plantaReal({ title: { ...plantaReal().blueprint.title, alternatives: [] } });
-  assert.ok(linhasDe(linhaDoArtigo({ blueprint: semAlternativas }).row.titulo_e_seo).includes("- Escreva mais 2 opções, cada uma num ângulo diferente (dor → saída; contraste com o que o topo da SERP promete (as \"dicas\" e os números); diagnóstico ou decisão (fundo de funil)), com a principal natural uma vez, em qualquer posição."));
+  assert.match(titulo[4], /^Termo principal: mantenha o sentido da busca/);
+  assert.match(titulo[5], /^Título pela SERP: H1, título SEO e meta devem identificar a entidade central/);
+  assert.match(titulo[6], /^Forma natural da principal: "como atrair um cliente"/);
+  assert.ok(titulo.some(item => item.startsWith("- Ajuste da alternativa 1: torne explícitos")));
+  assert.ok(titulo.some(item => item.startsWith("Gancho pela SERP:")));
+  assert.match(titulo[titulo.length - 1], /^Meta description: resuma o que o leitor conseguirá/);
+  assert.doesNotMatch(titulo.join("\n"), /uma vez no H1|até \d+ vezes|primeiros 60 caracteres/);
 });
 
 test("título · a planta gravada 'Para clínicas: como atrair um cliente' sai como está no CSV e no Redator (a troca de metades saiu), sem mudar o payload", () => {
@@ -414,17 +410,11 @@ test("título · a planta gravada 'Para clínicas: como atrair um cliente' sai c
 
 /* ============================== 5 · a abertura e os H2 (K5 e K6) ============================== */
 
-test("começo · a abertura nas primeiras ~100 palavras (K5); os 4 H2 do caso real que abrem pela keyword ou por uma complementar ganham a instrução concluída (K6)", () => {
-  const estrutura = linhasDe(linhaDoArtigo().row.estrutura);
-  assert.ok(estrutura.includes("- Abertura (K5): o primeiro parágrafo responde à busca com \"como atrair um cliente\" (na forma natural) ou uma variação próxima nas primeiras ~100 palavras, e entra na dor da SERP, para quem já tentou posts, feed, anúncio e agência (nível 3)."));
-  assert.equal(estrutura.filter(item => item.startsWith("- H2 (K6): abre pela keyword ")).length, 4, estrutura.filter(item => item.startsWith("- H2 (K6)")).join("\n"));
-  assert.ok(estrutura.includes("- H2 (K6): abre pela keyword \"como atrair um cliente\"; escreva este H2 pelo subtema ou pela pergunta da seção (\"Como atrair clientes no dia a dia\"), com a keyword dentro da seção, não no começo do título."));
-  assert.ok(estrutura.some(item => item.startsWith("- H2 sem keyword no começo (K6): 4 H2 abrem pela keyword (")));
-  assert.equal(estrutura.some(item => /^- Primeira frase do corpo|^- Primeiro H2:/.test(item)), false, "as linhas da regra antiga saíram");
-  const semKeyword = plantaReal();
-  const NOVOS = ["Contexto do mercado de estética", "Abordagem e relacionamento", "Canais e presença", "Experiência e fidelização", "Antes de atrair: perfil e capacidade", "Presença orgânica e busca local", "O plano da semana"];
-  semKeyword.blueprint.sections = semKeyword.blueprint.sections.map((secao, indice) => ({ ...secao, h2: NOVOS[indice] }));
-  assert.ok(linhasDe(linhaDoArtigo({ blueprint: semKeyword }).row.estrutura).includes("- H2 sem keyword no começo (K6): nenhum H2 abre pela principal nem por uma complementar."));
+test("Abertura e H2 respondem à intenção e à pergunta de cada seção", () => {
+  const estrutura = linhaDoArtigo().row.estrutura;
+  assert.match(estrutura, /^- Abertura: responda à intenção de "como atrair um cliente"/m);
+  assert.match(estrutura, /^- H2: dê a cada seção um título que identifique sua pergunta ou entrega/m);
+  assert.doesNotMatch(estrutura, /palavras\/600|nenhum H2 abre pela|nas primeiras ~100 palavras/);
 });
 
 /* ============================== 6 · de 3 a 6 H2 ============================== */
@@ -497,9 +487,9 @@ test("fechamento · 4 tempos com um CTA só, no pedido e no CSV", () => {
   /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D7): os 4 tempos viram 4 campos; o diagnóstico é o CTA único. */
   assert.match(radarHumanVoicePromptBlock()[1], /O fechamento tem 4 campos \(regras 2026-10-14b\): closing\.pain .*closing\.diagnosis \(o diagnóstico, a única chamada/);
   const row = linhaDoArtigo().row;
-  assert.ok(linhasDe(row.estrutura).includes("- Fechamento em 4 tempos: dor (o que a leitora já sentiu com a receita pronta) → mudança para a estrutura própria no Google → facilidade (a marca faz; a profissional só contribui com o que sabe) → diagnóstico (o CTA abaixo, a única chamada); a virada e o fim explicam a busca orgânica sem sigla (nível 2)."));
+  assert.match(row.estrutura, /^- Fechamento: retome o problema do leitor/m);
   assert.equal(linhasDe(row.estrutura).filter(item => /^CTA[ :(]/.test(item)).length, 1, "um CTA só");
-  assert.ok(linhasDe(row.estrutura).includes("- Autoridade local: 2 ou 3 sinais, onde o trecho pedir (o site como presença de captação local; as perguntas reais e a experiência da clínica virando autoridade; o contraste com a vida refém do feed e de posts soltos; a diferença para a agência comum de posts e anúncios)."));
+  assert.match(row.estrutura, /^- Autoridade: inclua experiência ou referências verificáveis/m);
 });
 
 test("imagens · capa obrigatória e imagem útil no corpo: a planta com elas diz onde; a sem elas ganha a instrução concluída; a conferência cobra", () => {

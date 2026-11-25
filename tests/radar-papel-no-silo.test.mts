@@ -422,7 +422,7 @@ test("3 · Silo sem Pilar: plano, planilha, CSV 'Para escrever' e artigo-modelo 
   assert.ok(!notes.some(nota => /Falta o link para o Pilar/.test(nota)), "Silo sem Pilar não cobra link para a sugestão da formação");
 });
 
-test("3 · a coluna Formato não mostra o papel copiado na importação", () => {
+test("3 · o filtro Formato usa a unidade do artigo", () => {
   const { itens } = radarDe(siloDna(PILAR));
   assert.equal(itens[0].format, "Suporte", "o campo gravado não muda");
   assert.equal(radarUnitFormatLabel(itens[0]), "Artigo");
@@ -437,7 +437,7 @@ test("3 · a coluna Formato não mostra o papel copiado na importação", () => 
 test("3 · o filtro Formato guardado com um papel é de antes e é descartado", () => {
   for (const antigo of ["Suporte", "Pilar", "Reforco Narrativo", "Reforço narrativo", "support"]) assert.equal(radarFormatFilterIsLegacyRole(antigo), true, antigo);
   for (const valido of ["Artigo", "SiloPage", "", undefined]) assert.equal(radarFormatFilterIsLegacyRole(valido), false, String(valido));
-  /* Nenhum valor da coluna nova é papel: o descarte nunca apaga um filtro válido. */
+  /* Nenhuma unidade é papel: o descarte preserva os filtros válidos. */
   const { itens } = radarDe(siloDna(PILAR));
   for (const item of [...itens, { unitType: "silo_page", format: "silo_page" }]) assert.equal(radarFormatFilterIsLegacyRole(radarUnitFormatLabel(item)), false);
   /* A fiação na planilha está no teste 5 (estrutural). */
@@ -618,7 +618,9 @@ test("5 · as telas do Radar não exibem `row.hierarchy` nem `payload.hierarchy`
   assert.doesNotMatch(pagina, /format: target\.format/);
   /* 2026-10-08 (revisão) · o filtro Formato guardado com um papel é descartado na planilha. */
   assert.match(await fonte("../modules/radar/radar-format-filter-legacy.tsx"), /useEffect\(\(\) => \{\s*if \(radarFormatFilterIsLegacyRole\(valor\)\) limpar\(\);\s*\}, \[valor, limpar\]\);/);
-  assert.match(pagina, /<RadarFormatoFiltroLegado valor=\{grid\.filters\[formatColumn\.id\]\} limpar=\{\(\) => grid\.setFilter\(formatColumn\.id, ""\)\}\/>/);
+  assert.match(pagina, /<RadarFormatoFiltroLegado valor=\{grid\.filters\[formatFilter\.id\]\} limpar=\{\(\) => grid\.setFilter\(formatFilter\.id, ""\)\}\/>/);
+  assert.match(pagina, /filterValueFor=\{radarGridFilterValue\}/);
+  assert.match(pagina, /id: "silo", header: "Silo", sortable: true, value: siloLabel/);
   assert.match(pagina, /buildRadarR3Model\(\{ row, article: article \|\| null, siloRole: papelNoSilo,/);
   assert.match(pagina, /buildRadarArticleResearchContext\(\{ item: row, article: article \|\| null, siloDna: siloDaLinha \}\)/);
   assert.ok((pagina.match(/siloRole: papelNoSilo \}\)/g) || []).length >= 2, "o contexto KGR e o contexto editorial recebem a régua");

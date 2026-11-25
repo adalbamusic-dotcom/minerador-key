@@ -172,7 +172,7 @@ export function radarWritingMaterialOf(linha: RadarWritingExportRow | null | und
   /* O fechamento: o bloco dos 4 campos (planta nova) ou a virada gravada com a linha dos 4 tempos do bloco de voz; depois o CTA. */
   const quatroCampos = blocoDesde(estrutura, /^Fechamento em 4 tempos \(/);
   const fechamento = [
-    ...(quatroCampos.length ? quatroCampos : [...comecaCom(estrutura, "Fechamento: "), ...comecaCom(estrutura, "- Fechamento em 4 tempos:")]),
+    ...(quatroCampos.length ? quatroCampos : [...comecaCom(estrutura, "Fechamento: "), ...comecaCom(estrutura, "- Fechamento:", "- Fechamento em 4 tempos:")]),
     ...comecaCom(estrutura, "Da página publicada, entra no fechamento"),
     ...comecaCom(estrutura, "CTA (a única chamada)", "CTA: ", "- Oferta de diagnóstico da Skill", "Fala aprovada do especialista"),
   ];
@@ -194,7 +194,7 @@ export function radarWritingMaterialOf(linha: RadarWritingExportRow | null | und
     closing: fechamento,
     titleAndKeyword: [
       ...titulo.filter(item => !/^(?:H1|Alternativas|SEO title|Meta description):/.test(item)),
-      ...comecaCom(estrutura, "- Abertura (K5)", "- H2 sem keyword no começo (K6)", "- A keyword principal está em", "- Os H2 \"", "- Keyword no corpo (K7)", "- H2 (K6):"),
+      ...comecaCom(estrutura, "Cobertura transversal:", "- Cobertura semântica:", "- Título final da seção:", "- Abertura:", "- H2:", "- Entidades e variações observadas na SERP:"),
     ],
     linkRules: [
       ...links.filter(item => !/^[LT]\d+ · /.test(item)),

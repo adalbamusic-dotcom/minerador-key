@@ -1,5 +1,7 @@
 # SDD — Silo interligado, keyword sem repetição antiga, SERP competitiva de verdade e fechamento da marca — 2026-10-14
 
+> Atualização aprovada pelo dono em 2026-11-25. No CSV Para escrever e no material extraído dele, as cotas de repetição e posição das regras K2, K5, K6 e K7 foram substituídas por cobertura de intenção, entidade, recorte e evidência por seção. A leitura reaplica o refinamento na exportação de uma planta aprovada. A formação do ArticleDNA, a estrutura aprovada do silo e os contratos de persistência permanecem sob as autoridades da SDD.
+
 **Atualização de 2026-11-15:** a sequência de aprovação do par do Silo anterior aos artigos substitui as descrições que o fechavam depois deles, conforme o [adendo aprovado de 02/11](adendo-silo-antes-dos-artigos-2026-11-02.md). Isso não cria outra linha nem comprova que os acionadores já foram adaptados; consultar o estado atual para o progresso real.
 
 **Adendo de 2026-11-02 — prévia dos links:** a autorização de processar Silos cuja prévia mostra apenas custo estimado está substituída: o mesmo botão exige custo calculado para o Silo escolhido na tela; selecione e processe um por vez enquanto as outras cópias não forem lidas. Seleção ou composição alterada exige nova prévia; o Radar continua apenas consumidor do grafo aprovado. Implementação local e testes em `docs/04-arquiteto/situacoes-resolvidas.md`; validação remota pendente.

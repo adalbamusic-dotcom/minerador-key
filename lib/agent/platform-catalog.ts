@@ -1059,7 +1059,7 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     decision: "human",
     access: "ui",
     screen: "radar",
-    howOnScreen: "Radar → abrir o artigo → Pesquisa, Vídeos, Especialista e Relatório. Em lote (2026-10-13): marcar os artigos na planilha → barra de lote → 'Pesquisar e finalizar (N artigos)' → a prévia diz o teto (DataForSEO e IA) → 'Confirmar e pesquisar'.",
+    howOnScreen: "Radar → abrir o artigo → Pesquisa, Vídeos, Especialista e Relatório. Para ordenar a planilha por silo, clique no cabeçalho “Silo”. Em lote (2026-10-13): marcar os artigos na planilha → barra de lote → 'Pesquisar e finalizar (N artigos)' → a prévia diz o teto (DataForSEO e IA) → 'Confirmar e pesquisar'.",
     routes: [
       "/api/editorial/radar-analysis",
       "/api/editorial/radar-analysis/extract",
@@ -1238,7 +1238,7 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     title: "Exportar 'Para escrever' (CSV/markdown)",
     purpose: "Levar o dossiê do artigo para escrever fora da plataforma.",
     requires: ["Pacote do Radar finalizado", "Artigo-modelo da SERP concluído de cada artigo"],
-    produces: ["Arquivo portátil com keywords, SERP, a estrutura do artigo-modelo, Assunto e links"],
+    produces: ["Arquivo portátil com mapa de cobertura semântica por seção, volumes medidos como referência editorial, SERP, Assunto e links"],
     cost: "free",
     decision: "agent",
     access: "tool",

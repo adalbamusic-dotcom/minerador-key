@@ -426,7 +426,7 @@ test("CSV: campo que veio vazio não deixa rótulo solto", () => {
   vazio.blueprint.visual = [{ slot: "CAPA", section: null, concept: "", prompt: "consultório", alt: "", caption: "" }];
   const colunas = radarArticleBlueprintColumns(vazio);
   assert.doesNotMatch(colunas.estrutura, /^Keywords: $/m);
-  assert.match(colunas.estrutura, /^Keywords:\n- captar clientes pela internet$/m, "a lista fica, sem seta nem parênteses vazios");
+  assert.match(colunas.estrutura, /^Cobertura transversal: captar clientes pela internet\./m);
   assert.match(colunas.estrutura, /^Abertura: responder "[^"]+" no primeiro parágrafo( \[|$)/m);
   assert.doesNotMatch(colunas.estrutura, / — $| — \[|\(\)|→ \(|fonte a obter \(\)/m);
   /* 2026-10-08 · C3 · D10: o link sem fonte vira instrução concluída — a afirmação delimitada, sem link, com a fonte que ela pede. */
